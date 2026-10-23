@@ -67,7 +67,7 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
     compiler=x86_64-apple-ios-simulator-clang
   fi
   prefix=$build_root/dependencies/$target
-  mkdir -p "$prefix" "$build_root/libffi-$target" "$build_root/openssl-$target" "$build_root/python-$target"
+  mkdir -p "$prefix" "$build_root/libffi-$target" "$build_root/openssl-$target" "$build_root/python-$target/Modules"
   (
     cd "$build_root/libffi-$target"
     CC="xcrun --sdk $sdk clang -target $triple" CFLAGS=-O2 \
@@ -95,6 +95,8 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
   (
     export PATH="$source_root/iOS/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     cd "$build_root/python-$target"
+    # Use the same embedded modules as the manual a-Shell build.
+    cp "$source_root/Modules/Setup_iOS.local" Modules/Setup.local
     # sys/unistd.h marks dup3/pipe2 as iOS 27+; keep the iOS 15 deployment baseline.
     CC="$compiler" CFLAGS="-I$build_root" CPPFLAGS="-I$build_root -I$prefix/include" \
       LDFLAGS="-L$prefix/lib -F$framework_dir -framework ios_system" \
@@ -103,9 +105,11 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
       --with-build-python="$build_root/host/python.exe" --without-ensurepip --with-app-store-compliance \
       --with-openssl="$prefix" --with-pkg-config=no
     make -j 4
+    nm -g Python.framework/Python > builtin-symbols.txt
     for module in _ssl _hashlib _ctypes _lzma; do
-      test -f "Modules/$module.cpython-313-$sdk.so"
+      grep -q " _PyInit_$module$" builtin-symbols.txt
     done
+    rm -rf "$build_root/install/$target"
     make -j 4 install
   )
   installed=$build_root/install/$target
