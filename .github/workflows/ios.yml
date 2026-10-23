@@ -1,133 +1,113 @@
-name: iOS frameworks
+name: Mini Intel runtime validation
 
 on:
-  pull_request:
-    paths-ignore:
-    - '**.md'
-    - '**.rst'
   workflow_dispatch:
-  push:
-    branches:
-    - '3.13'
-    tags:
-    - 'v*'
+    inputs:
+      producer_run:
+        description: Successful ci/python-mini run with python-ios and python-mini artifacts
+        required: true
+        default: '39985582184'
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  build:
-    runs-on: macos-26
-    timeout-minutes: 180
+  runtime:
+    if: github.repository == 'demrom/cpython'
+    runs-on: macos-26-intel
+    timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
     - uses: actions/checkout@v7
       with:
         persist-credentials: false
-    - name: Build Python 3.13 for iOS and Simulator
+    - name: Verify producer and Intel runner
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PRODUCER_RUN: ${{ inputs.producer_run }}
       run: |
-        brew install autoconf automake libtool cmake ninja openssl@3 pkgconf uv
+        test "$(uname -m)" = x86_64
         xcodebuild -version
-        nice -n 15 bash scripts/build-ci-ios.sh
-    - uses: actions/upload-artifact@v7
+        gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PRODUCER_RUN" > "$RUNNER_TEMP/producer.json"
+        jq -e '.conclusion == "success" and .head_branch == "ci/python-mini" and .head_sha == "fb086f726fe3dca49239717f7b48180998c36507"' "$RUNNER_TEMP/producer.json"
+    - uses: actions/download-artifact@v8
       with:
         name: python-ios
-        if-no-files-found: error
-        path: |
-          .build/ci/dist/*.zip
-          .build/ci/dist/python-stdlib.tar.gz
-          .build/ci/dist/checksums.txt
-          .build/ci/dist/release.md
-    - name: Build native XSLT inputs and mini packages
+        run-id: ${{ inputs.producer_run }}
+        github-token: ${{ github.token }}
+        path: .build/inputs/core
+    - uses: actions/download-artifact@v8
+      with:
+        name: python-mini
+        run-id: ${{ inputs.producer_run }}
+        github-token: ${{ github.token }}
+        path: .build/inputs/mini
+    - name: Stage checksum-verified Simulator packages
       run: |
-        git init .build/native-recipes
-        git -C .build/native-recipes fetch --depth 1 https://github.com/demrom/Python-aux.git f6710efd9f0c03e5073b43521f04759283d3fc40
-        git -C .build/native-recipes checkout --detach FETCH_HEAD
-        test "$(git -C .build/native-recipes rev-parse HEAD)" = f6710efd9f0c03e5073b43521f04759283d3fc40
-        git -C .build/native-recipes submodule update --init --depth 1 libxslt
-        (cd .build/native-recipes && nice -n 15 bash build_libxslt.sh)
-        nice -n 15 bash scripts/build-ci-mini.sh "$PWD/.build/ci" "$PWD/.build/native-recipes"
-    - name: Run packaged mini Python checks twice on Simulator
-      run: |
-        mini="$PWD/.build/mini"
-        core="$PWD/.build/ci"
-        consumer="$mini/consumer"
-        mkdir -p "$consumer/Frameworks" "$mini/http"
-        tar -xzf "$mini/dist/python-mini.tar.gz" -C "$consumer"
-        for archive in "$mini/dist/"*.xcframework.zip; do
-          unzip -q "$archive" -d "$consumer"
+        (cd .build/inputs/core && shasum -a 256 -c checksums.txt)
+        (cd .build/inputs/mini && shasum -a 256 -c mini-checksums.txt)
+        consumer="$PWD/.build/consumer"
+        mkdir -p "$consumer/Frameworks" "$consumer/Library/lib" "$consumer/unpacked"
+        for archive in .build/inputs/{core,mini}/*.xcframework.zip; do
+          unzip -q "$archive" -d "$consumer/unpacked"
           name=$(basename "$archive" .xcframework.zip)
-          cp -R "$consumer/$name.xcframework/ios-arm64_x86_64-simulator/$name.framework" "$consumer/Frameworks/"
+          cp -R "$consumer/unpacked/$name.xcframework/ios-arm64_x86_64-simulator/$name.framework" "$consumer/Frameworks/"
         done
-        printf 'mini-package-http\n' > "$mini/http/fixture.txt"
-        python3 -m http.server 18716 --bind 127.0.0.1 --directory "$mini/http" > "$mini/http/server.log" 2>&1 &
+        for archive in .build/inputs/core/python-stdlib.tar.gz .build/inputs/mini/python-mini.tar.gz; do
+          tar -xzf "$archive" -C "$consumer/unpacked"
+        done
+        cp -R "$consumer/unpacked/iphonesimulator/lib/" "$consumer/Library/lib/"
+        curl -fL --retry 3 https://github.com/holzschu/ios_system/releases/download/v3.0.5/ios_system.xcframework.zip -o .build/inputs/ios_system.zip
+        printf '%s  %s\n' d429e68102926f58bedd8e8b7105dcd169478cd6da1cef494a5f468482d1c8f5 .build/inputs/ios_system.zip | shasum -a 256 -c -
+        unzip -q .build/inputs/ios_system.zip -d "$consumer/unpacked"
+        cp -R "$consumer/unpacked/ios_system.xcframework/ios-arm64_x86_64-simulator/ios_system.framework" "$consumer/Frameworks/"
+        nice -n 15 xcrun --sdk iphonesimulator clang -target x86_64-apple-ios14.0-simulator iOS/tests/science.c \
+          -I"$consumer/Frameworks/Python.framework/Headers" -F"$consumer/Frameworks" \
+          -framework Python -framework ios_system -o .build/mini-python-x86_64
+        codesign --force --sign - .build/mini-python-x86_64
+        lipo -verify_arch x86_64 .build/mini-python-x86_64
+        file .build/mini-python-x86_64
+    - name: Run public packaged fixture twice on x86_64 Simulator
+      run: |
+        mkdir -p .build/http
+        printf 'mini-package-http\n' > .build/http/fixture.txt
+        python3 -m http.server 18716 --bind 127.0.0.1 --directory .build/http > .build/http/server.log 2>&1 &
         http_pid=$!
         device=
         trap 'kill "$http_pid"; if [[ -n $device ]]; then xcrun simctl shutdown "$device"; xcrun simctl delete "$device"; fi' EXIT
         for _ in {1..30}; do
-          if curl -fsS http://127.0.0.1:18716/fixture.txt > "$mini/http/readback.txt"; then break; fi
+          if curl -fsS http://127.0.0.1:18716/fixture.txt > .build/http/readback.txt; then break; fi
           sleep 1
         done
-        cmp "$mini/http/fixture.txt" "$mini/http/readback.txt"
-        runtime=$(xcrun simctl list runtimes -j | jq -r '[.runtimes[] | select(.isAvailable and (.identifier | contains("iOS")) and any(.supportedDeviceTypes[]?; .identifier == "com.apple.CoreSimulator.SimDeviceType.iPhone-17"))] | sort_by(.version | split(".") | map(tonumber)) | last.identifier // empty')
+        cmp .build/http/fixture.txt .build/http/readback.txt
+        xcrun simctl list runtimes -j > .build/runtimes.json
+        runtime=$(jq -r '[.runtimes[] | select(.isAvailable and (.identifier | contains("iOS")) and any(.supportedDeviceTypes[]?; .identifier == "com.apple.CoreSimulator.SimDeviceType.iPhone-17"))] | sort_by(.version | split(".") | map(tonumber)) | last.identifier // empty' .build/runtimes.json)
         test -n "$runtime"
-        device=$(xcrun simctl create CPython-Mini com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+        device=$(xcrun simctl create Mini-Intel com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
         xcrun simctl boot "$device"
         xcrun simctl bootstatus "$device" -b
+        consumer="$PWD/.build/consumer"
         result=0
-        SIMCTL_CHILD_PYTHONHOME="$core/install/iphonesimulator" \
-        SIMCTL_CHILD_PYTHONPATH="$consumer/iphonesimulator/lib/python3.13/site-packages" \
+        SIMCTL_CHILD_PYTHONHOME="$consumer/Library" \
+        SIMCTL_CHILD_PYTHONPATH="$consumer/Library/lib/python3.13/site-packages" \
         SIMCTL_CHILD_APPDIR="$consumer" \
-        SIMCTL_CHILD_DYLD_FRAMEWORK_PATH="$core/install/iphonesimulator:$mini/iphonesimulator/native" \
+        SIMCTL_CHILD_DYLD_FRAMEWORK_PATH="$consumer/Frameworks" \
         SIMCTL_CHILD_MINI_TEST_URL=http://127.0.0.1:18716/fixture.txt \
-          xcrun simctl spawn "$device" "$mini/mini-python-arm64" "$PWD/iOS/tests/mini.py" > "$mini/dist/mini-runtime.log" 2>&1 || result=$?
-        cat "$mini/dist/mini-runtime.log"
+          xcrun simctl spawn --arch=x86_64 "$device" "$PWD/.build/mini-python-x86_64" "$PWD/iOS/tests/mini.py" > .build/mini-runtime-x86_64.log 2>&1 || result=$?
+        cat .build/mini-runtime-x86_64.log
         test "$result" = 0
         for line in "CFFI allocation PASS" "Crypto, Cryptodome and cryptography AES PASS" "lxml XSLT and regex overlap PASS" "curl_cffi HTTP PASS"; do
-          test "$(grep -c -x -F "$line" "$mini/dist/mini-runtime.log")" = 2
+          test "$(grep -cxF "$line" .build/mini-runtime-x86_64.log)" = 2
         done
-        grep -q '^SCIENCE_REENTRY_PASSED$' "$mini/dist/mini-runtime.log"
+        grep -qx SCIENCE_REENTRY_PASSED .build/mini-runtime-x86_64.log
     - uses: actions/upload-artifact@v7
+      if: always()
       with:
-        name: python-mini
-        include-hidden-files: true
+        name: mini-intel-runtime
         if-no-files-found: error
         path: |
-          .build/mini/dist/*.xcframework.zip
-          .build/mini/dist/python-mini.tar.gz
-          .build/mini/dist/mini-checksums.txt
-          .build/mini/dist/mini-release.md
-          .build/mini/dist/*-ios-*.txt
-          .build/mini/dist/mini-runtime.log
-    - uses: actions/upload-artifact@v7
-      if: failure()
-      with:
-        name: mini-failure-log
-        if-no-files-found: ignore
-        path: .build/mini/dist/mini-runtime.log
-
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'holzschu/cpython'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-    - uses: actions/download-artifact@v8
-      with:
-        pattern: python-*
-        merge-multiple: true
-        path: dist
-    - name: Publish framework archives
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        cat dist/mini-checksums.txt >> dist/checksums.txt
-        cat dist/mini-release.md >> dist/release.md
-        if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" dist/*.zip dist/*.tar.gz dist/checksums.txt
-        else
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false \
-            --title "Release $GITHUB_REF_NAME" --notes-file dist/release.md dist/*.zip dist/*.tar.gz dist/checksums.txt
-        fi
+          .build/mini-runtime-x86_64.log
+          .build/runtimes.json
+          .build/http/server.log
