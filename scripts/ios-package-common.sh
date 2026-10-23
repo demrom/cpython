@@ -20,10 +20,25 @@ export PYTHON_FRAMEWORK_DIR=${PYTHON_FRAMEWORK_DIR:-$PREFIX/ios/Frameworks/$ASHE
 export IOS_TARGET_FLAGS="-target $IOS_TRIPLE -isysroot $IOS_SDKROOT -I$PYTHON_FRAMEWORK_DIR/Python.framework/Headers"
 export PATH=$PREFIX/Library/bin:$PATH
 export PYTHONPYCACHEPREFIX=$PREFIX/__pycache__
+export DEBUG="-O3 -g -Wall"
+export CYTHON_OPTIONS="-DCYTHON_PEP489_MULTI_PHASE_INIT=0 -DCYTHON_USE_DICT_VERSIONS=0 -DCYTHON_USE_PYTYPE_LOOKUP=0"
+APP=$(basename "$(dirname "$PREFIX")")
+export APP
 CODESIGNING_FOLDER_PATH=$PREFIX/iOS
 PRODUCT_BUNDLE_IDENTIFIER=Nicolas-Holzschuch
 DIRECTORY=$PREFIX/Library/lib/python3.13/site-packages
 mkdir -p "$DIRECTORY"
+
+copy_package_files() {
+	local directory
+	for directory in build/lib.*; do
+		test -d "$directory"
+		cp -R "$directory/" "$DIRECTORY/"
+	done
+	"$PYTHON_FOR_BUILD" setup.py egg_info --egg-base "$DIRECTORY"
+	# Native modules are installed as frameworks by install_site_package.
+	find "$DIRECTORY" -name '*.so' -delete
+}
 
 install_site_package() {
 	test "$#" -eq 2
