@@ -15,6 +15,13 @@ experiment with writing an iOS app in Python, tools such as `BeeWare's Briefcase
 <https://buildozer.readthedocs.io>`__ will provide a much more approachable
 user experience.
 
+CI builds for a-Shell
+=====================
+
+The ``iOS frameworks`` workflow builds arm64 device and universal arm64/x86_64 Simulator Python 3.13 frameworks and standard-library extension frameworks, including SSL, ctypes and lzma. It builds pinned OpenSSL, libffi, XZ and ios_system sources and needs no Fortran compiler. Run ``nice -n 15 bash scripts/build-ci-ios.sh`` with Xcode, Homebrew autoconf, automake, libtool, CMake, Ninja and openssl@3 installed. The deployment target is iOS 15.
+
+Pull requests, pushes to ``3.13``, tags and manual runs upload the ``python-ios`` artifact: xcframework ZIPs, ``python-stdlib.tar.gz`` and ``checksums.txt``. The stdlib archive contains separate ``iphoneos/lib`` and ``iphonesimulator/lib`` trees with a-Shell's ``.fwork`` placeholders. Third-party Python packages are built separately. A ``v*`` tag in holzschu/cpython also publishes these files as release assets; existing assets are never overwritten.
+
 Compilers for building on iOS
 =============================
 
