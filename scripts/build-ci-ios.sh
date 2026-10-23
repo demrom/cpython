@@ -45,16 +45,16 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
   sdk=${target%%-*}
   arch=arm64
   ffi_host=aarch64-apple-darwin
-  triple=arm64-apple-ios15.0
+  triple=arm64-apple-ios14.0
   openssl_target=ios64-xcrun
-  deployment_flag=-miphoneos-version-min=15.0
+  deployment_flag=-miphoneos-version-min=14.0
   compiler=arm64-apple-ios-clang
   platform=iPhoneOS
   destination='generic/platform=iOS'
   if [[ $sdk == iphonesimulator ]]; then
     triple=$triple-simulator
     openssl_target=iossimulator-arm64-xcrun
-    deployment_flag=-mios-simulator-version-min=15.0
+    deployment_flag=-mios-simulator-version-min=14.0
     compiler=arm64-apple-ios-simulator-clang
     platform=iPhoneSimulator
     destination='generic/platform=iOS Simulator'
@@ -62,7 +62,7 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
   if [[ $target == iphonesimulator-x86_64 ]]; then
     arch=x86_64
     ffi_host=x86_64-apple-darwin
-    triple=x86_64-apple-ios15.0-simulator
+    triple=x86_64-apple-ios14.0-simulator
     openssl_target=iossimulator-x86_64-xcrun
     compiler=x86_64-apple-ios-simulator-clang
   fi
@@ -83,21 +83,21 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
   )
   cmake -S "$build_root/sources/xz" -B "$build_root/xz-$target" -G Ninja \
     -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$sdk" -DCMAKE_OSX_ARCHITECTURES="$arch" \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF \
     -DXZ_TOOL_XZ=OFF -DXZ_TOOL_XZDEC=OFF -DXZ_TOOL_LZMADEC=OFF -DXZ_TOOL_LZMAINFO=OFF \
     -DXZ_DOC=OFF -DXZ_NLS=OFF -DCMAKE_INSTALL_PREFIX="$prefix"
   cmake --build "$build_root/xz-$target" -j 4
   cmake --install "$build_root/xz-$target"
   xcodebuild -project "$build_root/sources/ios_system/ios_system.xcodeproj" -scheme ios_system \
     -configuration Release -sdk "$sdk" -destination "$destination" -derivedDataPath "$build_root/ios-system-$target" \
-    -jobs 4 CODE_SIGNING_ALLOWED=NO IPHONEOS_DEPLOYMENT_TARGET=15.0 ARCHS="$arch" ONLY_ACTIVE_ARCH=NO build
+    -jobs 4 CODE_SIGNING_ALLOWED=NO IPHONEOS_DEPLOYMENT_TARGET=14.0 ARCHS="$arch" ONLY_ACTIVE_ARCH=NO build
   framework_dir=$build_root/ios-system-$target/Build/Products/Release-$sdk
   (
     export PATH="$source_root/iOS/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     cd "$build_root/python-$target"
     # Use the same embedded modules as the manual a-Shell build.
     cp "$source_root/Modules/Setup_iOS.local" Modules/Setup.local
-    # sys/unistd.h marks dup3/pipe2 as iOS 27+; keep the iOS 15 deployment baseline.
+    # sys/unistd.h marks dup3/pipe2 as iOS 27+; keep the iOS 14 deployment baseline.
     CC="$compiler" CFLAGS="-I$build_root" CPPFLAGS="-I$build_root -I$prefix/include" \
       LDFLAGS="-L$prefix/lib -F$framework_dir -framework ios_system" \
       LIBFFI_CFLAGS="-I$prefix/include" LIBFFI_LIBS=-lffi LIBLZMA_CFLAGS="-I$prefix/include" LIBLZMA_LIBS=-llzma \
@@ -127,7 +127,7 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
     plutil -replace CFBundleExecutable -string "$name" "$framework/Info.plist"
     plutil -replace CFBundleIdentifier -string "org.python.${name//_/-}" "$framework/Info.plist"
     plutil -replace CFBundleSupportedPlatforms.0 -string "$platform" "$framework/Info.plist"
-    plutil -replace MinimumOSVersion -string 15.0 "$framework/Info.plist"
+    plutil -replace MinimumOSVersion -string 14.0 "$framework/Info.plist"
     cp "$extension" "$framework/$name"
     install_name_tool -id "@rpath/$name.framework/$name" "$framework/$name"
     echo "Frameworks/$name.framework/$name" > "${extension%.so}.fwork"
