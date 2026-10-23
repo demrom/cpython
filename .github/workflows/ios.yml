@@ -67,7 +67,7 @@ jobs:
           -I"$consumer/Frameworks/Python.framework/Headers" -F"$consumer/Frameworks" \
           -framework Python -framework ios_system -o .build/mini-python-x86_64
         codesign --force --sign - .build/mini-python-x86_64
-        lipo -verify_arch x86_64 .build/mini-python-x86_64
+        lipo .build/mini-python-x86_64 -verify_arch x86_64
         file .build/mini-python-x86_64
     - name: Run public packaged fixture twice on x86_64 Simulator
       run: |
