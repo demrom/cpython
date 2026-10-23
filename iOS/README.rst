@@ -22,6 +22,8 @@ The ``iOS frameworks`` workflow builds arm64 device and universal arm64/x86_64 S
 
 Pull requests, pushes to ``3.13``, tags and manual runs upload the ``python-ios`` artifact: xcframework ZIPs, ``python-stdlib.tar.gz`` and ``checksums.txt``. The stdlib archive contains separate ``iphoneos/lib`` and ``iphonesimulator/lib`` trees with a-Shell's ``.fwork`` placeholders. Third-party Python packages are built separately. A ``v*`` tag in holzschu/cpython also publishes these files as release assets; existing assets are never overwritten.
 
+NumPy and SciPy use ``bash scripts/build-ci-science.sh <core-build-directory> <native-xcframework-directory> [build-directory]``. Run it after ``build-ci-ios.sh``, with the NumPy, Cython and pybind11 submodules initialized recursively, Homebrew Flang 23, pkgconf and uv installed, and matching ``openblas.xcframework`` and ``flang_rt.xcframework`` inputs built by the Python-aux Flang recipe. It builds NumPy 2.3.1 and SciPy 1.16.1 for the same three architectures, packages the eight a-Shell framework products and their Python files, and builds a Simulator Python launcher for ``iOS/tests/science.py``. The launcher runs the fixture on two sequential command threads in one process on the arm64 Simulator, including numerical operations and interpreter re-entry. It uses the pinned iOS Cython generator and pybind11 headers so their module cleanup and thread-local state match a-Shell. PROPACK's private helpers and COMMON blocks have distinct names per scalar type so the modules can share one SciPy framework.
+
 Compilers for building on iOS
 =============================
 
