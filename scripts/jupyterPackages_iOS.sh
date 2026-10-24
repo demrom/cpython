@@ -8,6 +8,29 @@ if [[ $# -gt 0 ]]; then
 	prepare_ios_cython
 	for package in "$@"; do
 		case $package in
+			pyzmq)
+				extract_ios_source pyzmq 27.2.0 54d4259d1bfae24ecdb5ca79f7acc2eac6c286a02d6a0ae617797cb45f0726d3
+				configure_ios_setup
+				cmake_build=$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK/pyzmq
+				rm -rf "$cmake_build"
+				mkdir -p "$cmake_build"
+				# PyZMQ invokes the host interpreter with explicitly supplied target headers.
+				printf '%s\n' 'cmake_policy(SET CMP0190 OLD)' 'set(CMAKE_SHARED_MODULE_CREATE_C_FLAGS "-dynamiclib")' 'cmake_language(DEFER CALL set_property TARGET Python::Module PROPERTY INTERFACE_LINK_OPTIONS)' > "$cmake_build/ios.cmake"
+				cmake -S "$IOS_SOURCE_DIR" -B "$cmake_build" -G Ninja \
+					-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$ASHELL_SDK" -DCMAKE_OSX_ARCHITECTURES="$ASHELL_ARCH" \
+					-DCMAKE_OSX_DEPLOYMENT_TARGET="$ASHELL_MIN_IOS" -DCMAKE_BUILD_TYPE=Release \
+					-DCMAKE_PROJECT_INCLUDE="$cmake_build/ios.cmake" \
+					-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=NEVER -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=NEVER -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=NEVER \
+					-DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_MODULE_LINKER_FLAGS="$LDFLAGS -undefined error" \
+					-DPython_EXECUTABLE="$PYTHON_FOR_BUILD" -DPython_INCLUDE_DIR="$PYTHON_FRAMEWORK_DIR/Python.framework/Headers" \
+					-DPython_LIBRARY="$PYTHON_FRAMEWORK_DIR/Python.framework/Python" \
+					-DPYZMQ_BACKEND=cffi -DPYZMQ_NO_BUNDLE=ON -DPYZMQ_LIBZMQ_RPATH=OFF -DZMQ_PREFIX="$IOS_NATIVE_DIR/libzmq.framework" \
+					-DLIBZMQ_INCLUDE_DIR="$IOS_NATIVE_DIR/libzmq.framework/Headers" -DLIBZMQ_LIBRARY="$IOS_NATIVE_DIR/libzmq.framework/libzmq"
+				cmake --build "$cmake_build" --target pyzmq --parallel 4
+				cp -R "$IOS_SOURCE_DIR/zmq" "$DIRECTORY/"
+				install_site_package zmq/backend/cffi/_cffi "$cmake_build/"_cffi*.so
+				continue
+				;;
 			argon2)
 				extract_ios_source argon2_cffi_bindings 25.1.0 b957f3e6ea4d55d820e40ff76f450952807013d361a65d7f28acc0acbf29229d
 				configure_ios_setup

@@ -22,7 +22,7 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
 	mkdir -p "$site" "$IOS_NATIVE_DIR/lib" "$IOS_NATIVE_DIR/include" "$PREFIX/packages"
 	ln -s "$science_root/$target/Library/lib/python3.13/site-packages/numpy" "$site/numpy"
 	ln -s "$core_root/ios-system-$target/Build/Products/Release-$ASHELL_SDK/ios_system.framework" "$IOS_NATIVE_DIR/ios_system.framework"
-	for name in openblas flang_rt libgeos libgeos_c libproj libgdal freetype libpng; do
+	for name in openblas flang_rt libomp libzmq libgeos libgeos_c libproj libgdal freetype libpng; do
 		ln -s "$native_root/$name.xcframework/$slice/$name.framework" "$IOS_NATIVE_DIR/$name.framework"
 	done
 	for name in jpeg tiff; do
@@ -41,7 +41,7 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
 	bash "$source_root/scripts/geopandasPackages_iOS.sh" fiona pyproj rasterio
 	bash "$source_root/scripts/astropyPackages_iOS.sh"
 	bash "$source_root/scripts/cartopyPackages_iOS.sh"
-	bash "$source_root/scripts/jupyterPackages_iOS.sh" argon2 psutil
+	bash "$source_root/scripts/jupyterPackages_iOS.sh" argon2 psutil pyzmq
 	bash "$source_root/scripts/pygeosPackages_iOS.sh"
 	bash "$source_root/scripts/qutipPackages_iOS.sh"
 	bash "$source_root/scripts/pandasPackages_iOS.sh" pyfftw cvxopt
@@ -49,8 +49,9 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
 	bash "$source_root/scripts/opencvPackages_iOS.sh"
 	bash "$source_root/scripts/langPackages_iOS.sh"
 	bash "$source_root/scripts/statsmodelsPackages_iOS.sh"
+	bash "$source_root/scripts/scikitLearnPackages_iOS.sh"
 	frameworks=("$PREFIX/iOS/Frameworks/"*.framework)
-	test "${#frameworks[@]}" = 44
+	test "${#frameworks[@]}" = 114
 	for framework in "${frameworks[@]}"; do
 		name=$(basename "$framework" .framework)
 		test "$(lipo -archs "$framework/$name")" = "$ASHELL_ARCH"
