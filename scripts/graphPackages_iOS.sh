@@ -1,195 +1,83 @@
-#! /bin/sh
+#!/bin/bash
+set -euo pipefail
 
-# Changed install prefix so multiple install coexist
-export PREFIX=$PWD
-export XCFRAMEWORKS_DIR=$PREFIX/Python-aux/
-# $PREFIX/Library/bin so that the new python is in the path, 
-# ~/.cargo/bin for rustc
-export PATH=$PREFIX/Library/bin:~/.cargo/bin:$PATH
-export PYTHONPYCACHEPREFIX=$PREFIX/__pycache__
-export OSX_SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-export IOS_SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
-export DEBUG="-O3 -g -Wall"
-export CYTHON_OPTIONS="-DCYTHON_PEP489_MULTI_PHASE_INIT=0 -DCYTHON_USE_DICT_VERSIONS=0 -DCYTHON_USE_PYTYPE_LOOKUP=0"
-# export DEBUG="-O3 -g -Wall"
-# TODO: remove -3.13 from $PREFIX/build directories, use $ARCH in directory names.
-# export ARCH=$(uname -m)
-# Loading different set of frameworks based on the Application:
-APP=$(basename `dirname $PWD`)
-#
-# Set to 1 if you have gfortran for arm64 installed. gfortran support is highly experimental.
-# You might need to edit the script as well.
-USE_FORTRAN=0
-if [ -e "/usr/local/aarch64-apple-darwin20/lib/libgfortran.dylib" ];then
-	USE_FORTRAN=1
-fi
-
-PYTHON_VER=3.13
-CODESIGNING_FOLDER_PATH=$PREFIX/iOS
-PRODUCT_BUNDLE_IDENTIFIER=Nicolas-Holzschuch
-
-# This function is for creating frameworks for site-packages Python modules (the ones in .../lib/python3.13/site-packages/
-install_site_package () {
-	DIRECTORY=$PREFIX/Library/lib/python3.13/site-packages
-	PACKAGE=$1
-	LIBRARY=$2
-
-	FULL_MODULE_NAME=Python-$(echo $PACKAGE | tr "/" ".")
-
-	# A bundle identifier; not actually used, but required by Xcode framework packaging
-	FRAMEWORK_BUNDLE_ID=$(echo $PRODUCT_BUNDLE_IDENTIFIER.$FULL_MODULE_NAME | tr "_" "-" | sed "s/^\.//")
-	# The name of the framework folder.
-	FRAMEWORK_FOLDER="Frameworks/$FULL_MODULE_NAME.framework"
-	
-	# If the framework folder doesn't exist, create it.
-	if [ ! -d "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER" ]; then
-		echo "Creating framework for $PACKAGE"
-		mkdir -p "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER"
-		cp "$CODESIGNING_FOLDER_PATH/dylib-Info-template.plist" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace CFBundleExecutable -string "$FULL_MODULE_NAME" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace CFBundleIdentifier -string "$FRAMEWORK_BUNDLE_ID" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		# Mine:
-		plutil -replace CFBundleName -string $FULL_MODULE_NAME "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTPlatformName -string "iphoneos" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTSDKName -string "iphoneos" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTPlatformVersion -string "14.0" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace MinimumOSVersion -string "14.0" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-	fi
-
-	echo "Installing binary for $FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	cp "$LIBRARY" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	# change framework id:
-	install_name_tool -id @rpath/$FULL_MODULE_NAME.framework/$FULL_MODULE_NAME "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	# Create a placeholder .fwork file where the .so is supposed to be:
-	echo "$FRAMEWORK_FOLDER/$FULL_MODULE_NAME" > $DIRECTORY/$PACKAGE.cpython-313-iphoneos.fwork 
-	# Create a back reference to the .so file location in the framework (relative to PYTHONHOME, which is $APPDIR/Library)
-	# This is currently not used in the code, AFAICS.
-	LOCAL_LIBRARY=$(echo $DIRECTORY | sed "s|$PREFIX/Library/||")
-	echo $LOCAL_LIBRARY/$PACKAGE.cpython-313-iphoneos.so > "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME.origin"
-}
-
-# end boilerplate
-#
-# 
-# For matplotlib
-## kiwisolver 
-pushd packages
-pushd kiwisolver*
-rm -rf build/* 
-# Due to many templated inline functions, kiwisolver *needs* -Oz to work.
-env CC=clang CXX=clang++ \
-	CPPFLAGS="-g -Oz  -arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT -I$PREFIX" \
-	CFLAGS="-g  -Oz -arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT -I$PREFIX" \
-	CXXFLAGS="-g  -Oz -arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT -I$PREFIX" \
-	LDFLAGS="-g -Oz -arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT -F$PREFIX/Frameworks_iphoneos -framework ios_system -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python" \
-	LDSHARED="clang -Oz  -v -g -undefined error -dynamiclib -isysroot $IOS_SDKROOT -F$PREFIX/Frameworks_iphoneos -framework ios_system -lz -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python" \
-	LDCXXSHARED="clang -Oz -g -undefined error -dynamiclib -isysroot $IOS_SDKROOT -F$PREFIX/Frameworks_iphoneos -framework ios_system -lz -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python" \
-	PLATFORM=iphoneos python3.13 setup.py build 
-echo kiwisolver libraries for iOS:
-# build/lib.macosx-11.5-x86_64-cpython-313/kiwisolver/_cext.cpython-313-darwin.so
-find build -name \*.so -print 
-install_site_package kiwisolver/_cext  ./build/lib.macosx-11.5-x86_64-cpython-313/kiwisolver/_cext.cpython-313-darwin.so
-popd 
-popd 
-## Pillow
-pushd packages
-pushd pillow*
-rm -rf build/* 
-env CC=clang CXX=clang++ CPPFLAGS="-arch arm64 -miphoneos-version-min=14.0 -I$PREFIX -I$PREFIX/Frameworks_iphoneos/include/" \
-	CFLAGS="-arch arm64 -miphoneos-version-min=14.0 -I$PREFIX -I$PREFIX/Frameworks_iphoneos/include/" \
-	CXXFLAGS="-arch arm64 -miphoneos-version-min=14.0 -I$PREFIX -I$PREFIX/Frameworks_iphoneos/include/" \
-	LDFLAGS="-arch arm64 -miphoneos-version-min=14.0 -F$PREFIX/Frameworks_iphoneos -framework ios_system -framework freetype -L$PREFIX/Frameworks_iphoneos/lib/ -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python" \
-	LDSHARED="clang -v -undefined error -dynamiclib -F$PREFIX/Frameworks_iphoneos -framework ios_system -framework freetype -F$PREFIX/ios/Frameworks/arm64-iphoneos -framework Python -L$PREFIX/Frameworks_iphoneos/lib/" \
-	PLATFORM=ios python3.13 setup.py build 
-echo Pillow libraries for iOS:
-find build -name \*.so -print 
-# _imagingmath.cpython-313-darwin.so
-# _imaging.cpython-313-darwin.so
-# _imagingft.cpython-313-darwin.so
-# _imagingmorph.cpython-313-darwin.so
-# _imagingtk.cpython-313-darwin.so
-#
-# Single library PIL.so
-clang -v -undefined error -dynamiclib \
-	-isysroot $IOS_SDKROOT \
-	-lz -lm \
-	-F$PREFIX/ios/Frameworks/arm64-iphoneos -framework Python \
-	-F$PREFIX/Frameworks_iphoneos -framework ios_system -framework freetype \
-	-L$PREFIX/Frameworks_iphoneos/lib -ljpeg -ltiff \
-	-L$PREFIX/build/lib.darwin-arm64-3.13 \
-	-O3 -Wall -arch arm64 \
-	-miphoneos-version-min=14.0 \
-	`find build -name \*.o` \
-	-L$PREFIX/Library/lib \
-	-o build/PIL.so 
-install_site_package PIL/PIL build/PIL.so
-# Now copy that PIL.fwork for all the dynamic libraries.
-pushd build/lib.macosx-11.5-x86_64-cpython-313
-for library in `find PIL -name \*.so`
-do
-	directory=`dirname $library`
-	libname=`basename $library .cpython-313-darwin.so`
-	cp $PREFIX/Library/lib/python3.13/site-packages/PIL/PIL.cpython-313-iphoneos.fwork $PREFIX/Library/lib/python3.13/site-packages/$directory/$libname.cpython-313-iphoneos.fwork
+source "$(dirname "$0")/ios-meson-package-common.sh"
+prepare_ios_cython
+if [[ $# == 0 ]]; then set -- kiwisolver pillow contourpy matplotlib; fi
+for package in "$@"; do
+	case $package in
+		kiwisolver)
+			extract_ios_source kiwisolver 1.4.9 c3b22c26c6fd6811b0ae8363b95ca8ce4ea3c202d3d0975b2914310ceb1bcc4d
+			configure_ios_setup
+			# The solver's templated inline functions require size optimization.
+			export CFLAGS="$CFLAGS -Oz" CPPFLAGS="$CPPFLAGS -Oz" CXXFLAGS="$CXXFLAGS -Oz"
+			pushd "$IOS_SOURCE_DIR"
+			run_ios_setup build --parallel 4
+			copy_package_files
+			install_site_package kiwisolver/_cext build/lib.*/kiwisolver/_cext*.so
+			popd ;;
+		pillow)
+			extract_ios_source pillow 11.3.0 3828ee7586cd0b2091b6209e5ad53e20d0649bbe87164a459d0676e035e8f523
+			configure_ios_setup
+			codec_lib=$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK/pillow-libs
+			mkdir -p "$codec_lib"
+			for spec in freetype:freetype libpng:png; do
+				framework=${spec%:*}; library=${spec#*:}
+				test -f "$IOS_NATIVE_DIR/$framework.framework/$framework"
+				ln -sfn "$IOS_NATIVE_DIR/$framework.framework/$framework" "$codec_lib/lib$library.dylib"
+				export CFLAGS="$CFLAGS -I$IOS_NATIVE_DIR/$framework.framework/Headers"
+			done
+			for library in jpeg tiff; do
+				test -f "$IOS_NATIVE_DIR/lib/lib$library.a"
+				test -d "$IOS_NATIVE_DIR/include/$library"
+				export CFLAGS="$CFLAGS -I$IOS_NATIVE_DIR/include/$library"
+			done
+			export CFLAGS="$CFLAGS -I$IOS_SDKROOT/usr/include"
+			export CPPFLAGS=$CFLAGS CXXFLAGS=$CFLAGS
+			export LDFLAGS="$LDFLAGS -L$IOS_SDKROOT/usr/lib -L$codec_lib -L$IOS_NATIVE_DIR/lib -ljpeg -ltiff -lfreetype -lpng"
+			export LDSHARED="clang -dynamiclib -undefined error $LDFLAGS" MAX_CONCURRENCY=4
+			pushd "$IOS_SOURCE_DIR"
+			# Match the existing recipe's JPEG/TIFF/FreeType/zlib dependency set.
+			run_ios_setup build_ext --parallel 4 --disable-platform-guessing --enable-jpeg --enable-zlib --enable-tiff --enable-freetype \
+				--disable-lcms --disable-webp --disable-avif --disable-jpeg2000 --disable-imagequant --disable-xcb --disable-raqm build
+			copy_package_files
+			install_setup_aggregate PIL
+			popd ;;
+		contourpy|matplotlib)
+			configure_meson_python "$package" "$DIRECTORY/numpy/_core/include"
+			options=()
+			if [[ $package == contourpy ]]; then
+				extract_ios_source contourpy 1.3.3 083e12155b210502d0bca491432bb04d56dc3432f95a979b429f2848c3dbe880
+				options=(-Dwerror=false)
+			else
+				extract_ios_source matplotlib 800b734 2411d2645194a9e5b1c90db4e90d4a8c56730038a852d0fbe2fe629288e47ee2 \
+					https://github.com/holzschu/matplotlib/archive/800b7346261205457cf5aa990ee890fd2eab0e9e.tar.gz
+				test -f "$IOS_NATIVE_DIR/freetype.framework/freetype"
+				cat > "$IOS_NATIVE_DIR/lib/pkgconfig/freetype2.pc" <<PKGCONFIG
+Name: freetype2
+Description: iOS FreeType framework
+Version: 23.2.17
+Cflags: -I$IOS_NATIVE_DIR/freetype.framework/Headers
+Libs: -F$IOS_NATIVE_DIR -framework freetype
+PKGCONFIG
+				export SETUPTOOLS_SCM_PRETEND_VERSION=0.0+g800b734
+				options=(-Dmacosx=false -Dsystem-freetype=true -Db_lto=false)
+			fi
+			meson setup --wipe "$MESON_BUILD_DIR" "$IOS_SOURCE_DIR" --cross-file "$MESON_CROSS_FILE" --native-file "$MESON_NATIVE_FILE" \
+				--prefix "$PREFIX/Library" --buildtype release "${options[@]}"
+			meson compile -C "$MESON_BUILD_DIR" -j 4
+			meson install -C "$MESON_BUILD_DIR" --no-rebuild
+			while IFS= read -r -d '' library; do
+				module=${library#"$DIRECTORY/"}; module=${module%%.cpython-*}
+				# a-Shell's project keeps backend framework names at the package root.
+				framework_module=${module/\/backends\//\/}
+				install_site_package "$framework_module" "$library"
+				if [[ $framework_module != "$module" ]]; then
+					mv "$DIRECTORY/$framework_module.cpython-313-$ASHELL_SDK.fwork" "$DIRECTORY/$module.cpython-313-$ASHELL_SDK.fwork"
+				fi
+				rm "$library"
+			done < <(find "$DIRECTORY/$package" -name "*.cpython-313-$ASHELL_SDK.so" -print0)
+			;;
+		*) echo "Unsupported graphics package: $package" >&2; exit 1 ;;
+	esac
 done
-popd 
-popd 
-popd 
-## contourpy: 
-pushd packages
-# Because meson cannot handle environment variables
-cp iphone-osx_basis.meson iphone-osx.meson 
-sed -i bak "s|__prefix__|${PREFIX}|" iphone-osx.meson
-# ./src/_contourpy.cpython-313-darwin.so
-pushd contourpy* 
-rm -rf build 
-mkdir build
-env CC=clang CXX=clang++ meson . build --cross-file ../iphone-osx.meson
-pushd build 
-# Something between ninja and meson is preventing the creation of dynamic libraries, creates bundles instead:
-sed -i bak "s/bundle/shared/" build.ninja
-ninja 
-popd 
-mkdir -p $PREFIX/build/lib.darwin-arm64-3.13/contourpy/ 
-echo contourpy libraries for iOS:
-find build -name \*.so -print 
-install_site_package contourpy/_contourpy build/src/_contourpy.cpython-313-darwin.so 
-popd 
-popd 
-#
-## matplotlib
-#
-pushd packages
-pushd matplotlib 
-mkdir -p build_ios
-# rm -rf build_ios/* 
-env CC=clang CXX=clang++ CFLAGS="-I /opt/X11/include/freetype2/ -isysroot $OSX_SDKROOT" \
-	CXXFLAGS="-isysroot $OSX_SDKROOT" \
-	LDFLAGS="-L/opt/X11/lib -isysroot $OSX_SDKROOT" \
-	LDSHARED="clang -v -undefined error -dynamiclib -isysroot $OSX_SDKROOT -lz -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python -lc++ " \
-	$PREFIX/Library/bin/meson build_ios -Dmacosx=false --cross-file ../iphone-osx.meson
-pushd build_ios 
-# Something between ninja and meson is preventing the creation of dynamic libraries, creates bundles instead:
-sed -i bak "s/bundle/shared/" build.ninja
-ninja 
-popd
-echo matplotlib libraries for iOS:
-find build_ios -name \*.so -print 
-# _tkagg.cpython-313-darwin.so  --> backends
-# _image.cpython-313-darwin.so
-# _ttconv.cpython-313-darwin.so
-# _backend_agg.cpython-313-darwin.so  --> backends
-# _tri.cpython-313-darwin.so
-# _qhull.cpython-313-darwin.so
-# _path.cpython-313-darwin.so
-# ft2font.cpython-313-darwin.so
-# _c_internal_utils.cpython-313-darwin.so
-for library in `find build_ios -name \*.so`
-do
-	directory=`dirname $library`
-	libname=`basename $library .cpython-313-darwin.so`
-	install_site_package matplotlib/$libname $library 
-done
-mv $PREFIX/Library/lib/python3.13/site-packages/matplotlib/_backend_agg.cpython-313-iphoneos.fwork $PREFIX/Library/lib/python3.13/site-packages/matplotlib/backends/
-mv $PREFIX/Library/lib/python3.13/site-packages/matplotlib/_tkagg.cpython-313-iphoneos.fwork $PREFIX/Library/lib/python3.13/site-packages/matplotlib/backends/
-popd 
-popd 

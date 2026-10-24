@@ -1,96 +1,44 @@
-#! /bin/sh
+#!/bin/bash
+set -euo pipefail
 
-# Changed install prefix so multiple install coexist
-export PREFIX=$PWD
-export XCFRAMEWORKS_DIR=$PREFIX/Python-aux/
-# $PREFIX/Library/bin so that the new python is in the path, 
-# ~/.cargo/bin for rustc
-export PATH=$PREFIX/Library/bin:~/.cargo/bin:$PATH
-export PYTHONPYCACHEPREFIX=$PREFIX/__pycache__
-export OSX_SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-export IOS_SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
-export DEBUG="-O3 -g -Wall"
-export CYTHON_OPTIONS="-DCYTHON_PEP489_MULTI_PHASE_INIT=0 -DCYTHON_USE_DICT_VERSIONS=0 -DCYTHON_USE_PYTYPE_LOOKUP=0"
-# export DEBUG="-O3 -g -Wall"
-# TODO: remove -3.13 from $PREFIX/build directories, use $ARCH in directory names.
-# export ARCH=$(uname -m)
-# Loading different set of frameworks based on the Application:
-APP=$(basename `dirname $PWD`)
-#
-# Set to 1 if you have gfortran for arm64 installed. gfortran support is highly experimental.
-# You might need to edit the script as well.
-USE_FORTRAN=0
-if [ -e "/usr/local/aarch64-apple-darwin20/lib/libgfortran.dylib" ];then
-	USE_FORTRAN=1
-fi
-
-PYTHON_VER=3.13
-CODESIGNING_FOLDER_PATH=$PREFIX/iOS
-PRODUCT_BUNDLE_IDENTIFIER=Nicolas-Holzschuch
-
-# This function is for creating frameworks for site-packages Python modules (the ones in .../lib/python3.13/site-packages/
-install_site_package () {
-	DIRECTORY=$PREFIX/Library/lib/python3.13/site-packages
-	PACKAGE=$1
-	LIBRARY=$2
-
-	FULL_MODULE_NAME=Python-$(echo $PACKAGE | tr "/" ".")
-
-	# A bundle identifier; not actually used, but required by Xcode framework packaging
-	FRAMEWORK_BUNDLE_ID=$(echo $PRODUCT_BUNDLE_IDENTIFIER.$FULL_MODULE_NAME | tr "_" "-" | sed "s/^\.//")
-	# The name of the framework folder.
-	FRAMEWORK_FOLDER="Frameworks/$FULL_MODULE_NAME.framework"
-	
-	# If the framework folder doesn't exist, create it.
-	if [ ! -d "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER" ]; then
-		echo "Creating framework for $PACKAGE"
-		mkdir -p "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER"
-		cp "$CODESIGNING_FOLDER_PATH/dylib-Info-template.plist" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace CFBundleExecutable -string "$FULL_MODULE_NAME" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace CFBundleIdentifier -string "$FRAMEWORK_BUNDLE_ID" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		# Mine:
-		plutil -replace CFBundleName -string $FULL_MODULE_NAME "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTPlatformName -string "iphoneos" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTSDKName -string "iphoneos" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTPlatformVersion -string "14.0" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace MinimumOSVersion -string "14.0" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-	fi
-
-	echo "Installing binary for $FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	cp "$LIBRARY" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	# change framework id:
-	install_name_tool -id @rpath/$FULL_MODULE_NAME.framework/$FULL_MODULE_NAME "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	# Create a placeholder .fwork file where the .so is supposed to be:
-	echo "$FRAMEWORK_FOLDER/$FULL_MODULE_NAME" > $DIRECTORY/$PACKAGE.cpython-313-iphoneos.fwork 
-	# Create a back reference to the .so file location in the framework (relative to PYTHONHOME, which is $APPDIR/Library)
-	# This is currently not used in the code, AFAICS.
-	LOCAL_LIBRARY=$(echo $DIRECTORY | sed "s|$PREFIX/Library/||")
-	echo $LOCAL_LIBRARY/$PACKAGE.cpython-313-iphoneos.so > "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME.origin"
-}
-
-# end boilerplate
-#
-pushd packages
-pushd pygeos-*
-rm -rf build/* 
-env CC=clang CXX=clang++ \
-CPPFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT $CYTHON_OPTIONS -I$PREFIX -I $PREFIX/Frameworks_iphoneos/include" \
-CFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT $DEBUG  $CYTHON_OPTIONS -I$PREFIX -I $PREFIX/Frameworks_iphoneos/include/" \
-CXXFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT $DEBUG $CYTHON_OPTIONS -I$PREFIX -I $PREFIX/Frameworks_iphoneos/include" \
-LDFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT $DEBUG -F $PREFIX/Frameworks_iphoneos/ -framework libgeos_c" \
-LDSHARED="clang -v -undefined error -dynamiclib -isysroot $IOS_SDKROOT -lz $DEBUG -F $PREFIX/Frameworks_iphoneos/ -L$PREFIX/Frameworks_iphoneos/lib -L$PREFIX/build/lib.darwin-arm64-3.13  -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python -framework libgeos_c" \
-PLATFORM=iphoneos \
-GEOS_INCLUDE_PATH=$PREFIX/Frameworks_iphoneos/include \
-GEOS_LIBRARY_PATH=$PREFIX/Frameworks_iphoneos/lib \
-python3.13 setup.py build
-pushd build/lib.macosx-*-cpython-313
-for library in `find pygeos -name \*.so`
-do
-	directory=$(dirname $library)
-	libname=$(basename $library .cpython-313-darwin.so)
-	install_site_package $directory/$libname $library
+source "$(dirname "$0")/ios-package-common.sh"
+prepare_ios_cython
+extract_ios_source pygeos 0.14 30fbc17f64844200b85133b885fcfb65541b8779531f6ef4f8fe467d3fba7623
+configure_ios_setup
+export GEOS_INCLUDE_PATH=$IOS_NATIVE_DIR/libgeos_c.framework/Headers GEOS_LIBRARY_PATH=$IOS_NATIVE_DIR
+export LDSHARED="$LDSHARED -framework libgeos_c" LDCXXSHARED="$LDCXXSHARED -framework libgeos_c"
+"$PYTHON_FOR_BUILD" - "$IOS_SOURCE_DIR" <<'PY'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+path = root / "setup.py"
+text = path.read_text()
+for old, new in [('from pkg_resources import parse_version', 'from packaging.version import parse as parse_version'), ('"libraries": ["geos_c"],', '"libraries": [],')]:
+    assert old in text
+    text = text.replace(old, new)
+path.write_text(text)
+path = root / "pygeos/_geos.pyx"
+text = path.read_text()
+old = 'cdef void geos_message_handler(const char* message, void* userdata):'
+assert old in text
+path.write_text(text.replace(old, old[:-1] + ' noexcept:'))
+path = root / "versioneer.py"
+text = path.read_text()
+assert 'configparser.SafeConfigParser()' in text and 'parser.readfp(f)' in text
+path.write_text(text.replace('configparser.SafeConfigParser()', 'configparser.ConfigParser()').replace('parser.readfp(f)', 'parser.read_file(f)'))
+for path in (root / 'src').glob('*.c'):
+    text = path.read_text()
+    if '#include <numpy/npy_3kcompat.h>' in text:
+        text = text.replace('#include <numpy/npy_3kcompat.h>\n', '')
+    if path.name == 'ufuncs.c':
+        assert 'npy_intp* dimensions' in text and 'npy_intp* steps' in text
+        text = text.replace('npy_intp* dimensions', 'const npy_intp* dimensions').replace('npy_intp* steps', 'const npy_intp* steps')
+    path.write_text(text)
+PY
+pushd "$IOS_SOURCE_DIR"
+run_ios_setup build --parallel 4
+copy_package_files
+for module in lib _geometry _geos; do
+	install_site_package "pygeos/$module" build/lib.*/pygeos/"$module"*.so
 done
 popd
-popd 
-popd
-install_name_tool -change @rpath/libgeos.3.11.0.dylib @rpath/libgeos.framework/libgeos $PREFIX/Python-aux/libgeos_c.xcframework/ios-arm64/libgeos_c.framework/libgeos_c

@@ -1,133 +1,96 @@
-#! /bin/sh
+#!/bin/bash
+set -euo pipefail
 
-# Changed install prefix so multiple install coexist
-export PREFIX=$PWD
-export XCFRAMEWORKS_DIR=$PREFIX/Python-aux/
-# $PREFIX/Library/bin so that the new python is in the path, 
-# ~/.cargo/bin for rustc
-export PATH=$PREFIX/Library/bin:~/.cargo/bin:$PATH
-export PYTHONPYCACHEPREFIX=$PREFIX/__pycache__
-export OSX_SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-export IOS_SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
-export DEBUG="-O3 -g -Wall"
-export CYTHON_OPTIONS="-DCYTHON_PEP489_MULTI_PHASE_INIT=0 -DCYTHON_USE_DICT_VERSIONS=0 -DCYTHON_USE_PYTYPE_LOOKUP=0"
-# export DEBUG="-O3 -g -Wall"
-# TODO: remove -3.13 from $PREFIX/build directories, use $ARCH in directory names.
-# export ARCH=$(uname -m)
-# Loading different set of frameworks based on the Application:
-APP=$(basename `dirname $PWD`)
-#
-# Set to 1 if you have gfortran for arm64 installed. gfortran support is highly experimental.
-# You might need to edit the script as well.
-USE_FORTRAN=0
-if [ -e "/usr/local/aarch64-apple-darwin20/lib/libgfortran.dylib" ];then
-	USE_FORTRAN=1
-fi
-
-PYTHON_VER=3.13
-CODESIGNING_FOLDER_PATH=$PREFIX/iOS
-PRODUCT_BUNDLE_IDENTIFIER=Nicolas-Holzschuch
-
-# This function is for creating frameworks for site-packages Python modules (the ones in .../lib/python3.13/site-packages/
-install_site_package () {
-	DIRECTORY=$PREFIX/Library/lib/python3.13/site-packages
-	PACKAGE=$1
-	LIBRARY=$2
-
-	FULL_MODULE_NAME=Python-$(echo $PACKAGE | tr "/" ".")
-
-	# A bundle identifier; not actually used, but required by Xcode framework packaging
-	FRAMEWORK_BUNDLE_ID=$(echo $PRODUCT_BUNDLE_IDENTIFIER.$FULL_MODULE_NAME | tr "_" "-" | sed "s/^\.//")
-	# The name of the framework folder.
-	FRAMEWORK_FOLDER="Frameworks/$FULL_MODULE_NAME.framework"
-	
-	# If the framework folder doesn't exist, create it.
-	if [ ! -d "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER" ]; then
-		echo "Creating framework for $PACKAGE"
-		mkdir -p "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER"
-		cp "$CODESIGNING_FOLDER_PATH/dylib-Info-template.plist" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace CFBundleExecutable -string "$FULL_MODULE_NAME" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace CFBundleIdentifier -string "$FRAMEWORK_BUNDLE_ID" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		# Mine:
-		plutil -replace CFBundleName -string $FULL_MODULE_NAME "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTPlatformName -string "iphoneos" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTSDKName -string "iphoneos" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTPlatformVersion -string "14.0" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace MinimumOSVersion -string "14.0" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-	fi
-
-	echo "Installing binary for $FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	cp "$LIBRARY" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	# change framework id:
-	install_name_tool -id @rpath/$FULL_MODULE_NAME.framework/$FULL_MODULE_NAME "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	# Create a placeholder .fwork file where the .so is supposed to be:
-	echo "$FRAMEWORK_FOLDER/$FULL_MODULE_NAME" > $DIRECTORY/$PACKAGE.cpython-313-iphoneos.fwork 
-	# Create a back reference to the .so file location in the framework (relative to PYTHONHOME, which is $APPDIR/Library)
-	# This is currently not used in the code, AFAICS.
-	LOCAL_LIBRARY=$(echo $DIRECTORY | sed "s|$PREFIX/Library/||")
-	echo $LOCAL_LIBRARY/$PACKAGE.cpython-313-iphoneos.so > "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME.origin"
-}
-
-# end boilerplate
-# 
-if [ $USE_FORTRAN == 1 ];
-then
-    pushd packages
-    pushd opencv-python 
-    # Compiling OpenCV for iOS, 
-    # use Makefiles rather than Ninja because we need the dynamic library to be a -dynamiclib, not a -bundle.
-    rm -rf _skbuild/* 
-	# This option caused the compilation to fail
-	# SETUPTOOLS_USE_DISTUTILS=stdlib \
-    env CC=clang CXX=clang++ CPPFLAGS="-isysroot $IOS_SDKROOT -I $PREFIX/Frameworks_iphoneos/include" \
-    	CFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT $DEBUG -I $PREFIX/Frameworks_iphoneos/include/ -I$PREFIX/ -DPNG_ARM_NEON_OPT=0" \
-    	CXXFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT $DEBUG -I $PREFIX/Frameworks_iphoneos/include -I$PREFIX/" \
-    	LDFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $IOS_SDKROOT $DEBUG -F $PREFIX/Frameworks_iphoneos/  -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python" \
-    	LDSHARED="clang -v -undefined error -dynamiclib -isysroot $IOS_SDKROOT -lz  -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python $DEBUG -F $PREFIX/Frameworks_iphoneos/ " \
-    	CMAKE_INSTALL_PREFIX=@rpath \
-    	CMAKE_BUILD_TYPE=Release \
-    	CMAKE_OSX_SYSROOT=${IOS_SDKROOT} \
-    	CMAKE_C_COMPILER=clang \
-    	ENABLE_CONTRIB=1 \
-    	ENABLE_HEADLESS=1 \
-    	PYTHON_DEFAULT_EXECUTABLE=python3.13 \
-    	CMAKE_CXX_COMPILER=clang++ \
-    	CMAKE_C_FLAGS="-arch arm64 -target arm64-apple-darwin19.6.0 -O2 -miphoneos-version-min=14 -I$PREFIX/Frameworks_iphoneos/libssh2.framework/Headers -I$PREFIX/Frameworks_iphoneos/include/ -I$PREFIX/ -DPNG_ARM_NEON_OPT=0" \
-    	CMAKE_MODULE_LINKER_FLAGS="-arch arm64 -target arm64-apple-darwin19.6.0 -O2 -miphoneos-version-min=14 -F$PREFIX/Frameworks_iphoneos  -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python " \
-    	CMAKE_SHARED_LINKER_FLAGS="-arch arm64 -target arm64-apple-darwin19.6.0 -O2 -miphoneos-version-min=14 -F$PREFIX/Frameworks_iphoneos -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python " \
-    	CMAKE_EXE_LINKER_FLAGS="-arch arm64 -target arm64-apple-darwin19.6.0 -O2 -miphoneos-version-min=14 -F$PREFIX/Frameworks_iphoneos -framework ios_system -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python" \
-    	CMAKE_LIBRARY_PATH="${IOS_SDKROOT}/lib/:$PREFIX/Frameworks_iphoneos/lib/" \
-    	CMAKE_INCLUDE_PATH="${IOS_SDKROOT}/include/:$PREFIX/Frameworks_iphoneos/include" \
-    	PLATFORM=iphoneos \
-    	python3.13 setup.py build
-    echo "Done first pass, let's create the cv2 library"
-# I've been unable to convince Cmake + Ninja to create a dynamic library instead of a bundle. Time for some ugly hacking:
-    pushd _skbuild/iphoneos-14.0-arm64-3.13/cmake-build
-	clang++ \
-		-arch arm64 -miphoneos-version-min=14.0 -isysroot ${IOS_SDKROOT} -O3 -Wall -fsigned-char -W -Wall -Werror=return-type -Werror=non-virtual-dtor -Werror=address -Werror=sequence-point -Wformat -Werror=format-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -fdiagnostics-show-option -Wno-long-long -Qunused-arguments -Wno-semicolon-before-method-body  -fvisibility=hidden -fvisibility-inlines-hidden -Wno-unused-function -Wno-deprecated-declarations -Wno-overloaded-virtual -Wno-unused-private-field -Wno-undef -O3 -DNDEBUG  \
-		-dynamiclib -Wl,-headerpad_max_install_names \
-		 -F $PREFIX/Frameworks_iphoneos/  -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python  -undefined error \
-		-o lib/python3/cv2.cpython-313-darwin.so \
-		modules/python3/CMakeFiles/opencv_python3.dir/__/src2/*.cpp.o lib/*.a 3rdparty/lib/*.a \
-		-framework Accelerate  -framework AVFoundation  -framework CoreGraphics  -framework CoreImage  -framework CoreMedia  -framework CoreVideo  -framework UIKit  -framework QuartzCore  lib/libopencv_video.a  lib/libopencv_dnn.a  3rdparty/lib/liblibprotobuf.a  lib/libopencv_calib3d.a  lib/libopencv_features2d.a  lib/libopencv_flann.a  lib/libopencv_imgproc.a  lib/libopencv_core.a  3rdparty/lib/libzlib.a  3rdparty/lib/libittnotify.a  -ldl  $PREFIX/Frameworks_iphoneos/lib/libopenblas.dylib  -lm  -ldl \
-	-lobjc -framework Foundation 
-    echo "Done creating cv2 library"	
-    popd 
-	# All these are the same. They use libopenblas: must change to openblas.framework
-	echo "opencv libraries for iOS: " 
-	find . -name \*.so -exec ls -l {} \;
-	find . -name \*.so -exec file {} \;
-    # ./_skbuild/iphoneos-14.0-arm64-3.13/cmake-build/lib/python3/cv2.cpython-313-darwin.so: Mach-O 64-bit arm64 dynamically linked shared library, flags:<NOUNDEFS|DYLDLINK|TWOLEVEL|BINDS_TO_WEAK|NO_REEXPORTED_DYLIBS>
-    # ./_skbuild/iphoneos-14.0-arm64-3.13/cmake-install/cv2/cv2.cpython-313-darwin.so: Mach-O 64-bit arm64 bundle, flags:<NOUNDEFS|DYLDLINK|TWOLEVEL|BINDS_TO_WEAK>
-    # ./_skbuild/iphoneos-14.0-arm64-3.13/cmake-install/python/cv2.cpython-313-darwin.so: Mach-O 64-bit arm64 bundle, flags:<NOUNDEFS|DYLDLINK|TWOLEVEL|BINDS_TO_WEAK>
-    # ./_skbuild/iphoneos-14.0-arm64-3.13/setuptools/lib.macosx-11.5-x86_64-cpython-313/cv2/cv2.cpython-313-darwin.so: Mach-O 64-bit arm64 bundle, flags:<NOUNDEFS|DYLDLINK|TWOLEVEL|BINDS_TO_WEAK>
-    library=_skbuild/iphoneos-14.0-arm64-3.13/cmake-build/lib/python3/cv2.cpython-313-darwin.so
-	# Fix the reference to libopenblas.dylib -> openblas.framework
-	if [[ $(otool -l $library | grep libopenblas) ]];
-	then 
-		install_name_tool -change $PREFIX/Frameworks_iphoneos/lib/libopenblas.dylib @rpath/openblas.framework/openblas $library 
-	fi
-    install_site_package cv2/cv2 $library 
-    popd 
-    popd 
-fi
+source "$(dirname "$0")/ios-package-common.sh"
+prepare_ios_cython
+# Nested source revisions of the existing opencv-python ac63f5b gitlink.
+extract_ios_source opencv 69357b1 1eda61564b06799e85b081512b8a56d9a962498ed14e96611e09701e26b30816 https://github.com/opencv/opencv/archive/69357b1e88680658a07cffde7678a4d697469f03.tar.gz
+opencv_source=$IOS_SOURCE_DIR
+extract_ios_source opencv_contrib f5d7f67 5a3323aad04ec31b488df9c6262f9a5b6286d467555d01887d31c35ef5430875 https://github.com/opencv/opencv_contrib/archive/f5d7f6712d4ff229ba4f45cf79dfd11c557d56fd.tar.gz
+contrib_source=$IOS_SOURCE_DIR
+extract_ios_source opencv-python ac63f5b 8b691eacdd8824394a009141bab4b3737deb3d7f7e6cb17b2ea758c408ffb677 https://github.com/holzschu/opencv-python/archive/ac63f5b0e67cb2c54aefeac107c10d3a3789066c.tar.gz
+cp -R "$IOS_SOURCE_DIR/cv2/" "$DIRECTORY/cv2/"
+cp "$opencv_source/data/haarcascades/"*.xml "$DIRECTORY/cv2/data/"
+configure_ios_setup
+"$PYTHON_FOR_BUILD" - "$opencv_source/modules/python/common.cmake" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = 'ocv_add_library(${the_module} MODULE '
+assert old in text and '-undefined dynamic_lookup' in text
+path.write_text(text.replace(old, 'ocv_add_library(${the_module} SHARED ').replace('-undefined dynamic_lookup', '-undefined error'))
+PY
+# Apple SDK headers also declare Point, Size, Rect and Ptr in the global namespace.
+"$PYTHON_FOR_BUILD" - "$opencv_source/modules/python/src2/cv2.cpp" <<'PYTHON'
+from pathlib import Path
+import re
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+text, count = re.subn(r"(?<![:\w])(Point|Size|Rect|Ptr)\b", r"cv::\1", text)
+assert count == 11, count
+path.write_text(text)
+PYTHON
+"$PYTHON_FOR_BUILD" - "$opencv_source/modules/python/src2/gen2.py" <<'PYTHON'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+assert text.count('Ptr<') == 6
+text = text.replace('Ptr<', 'cv::Ptr<')
+old = '    return tp\n\n\nclass ArgInfo'
+assert old in text
+text = text.replace(old, '    return re.sub(r"(?<![:\\w])(Point|Size|Rect|Ptr)\\b", r"cv::\\1", tp)\n\n\nclass ArgInfo')
+text = text.replace('self.rettype = decl[4] or handle_ptr(decl[1])', 'self.rettype = handle_ptr(decl[4] or decl[1])')
+text = text.replace('self.defval = arg_tuple[2]', 'self.defval = handle_ptr(arg_tuple[2])')
+text = text.replace('pass_by_val_types = ["Point*", "Point2f*", "Rect*",', 'pass_by_val_types = ["cv::Point*", "Point2f*", "cv::Rect*",')
+text = text.replace('mappable=mappable', 'mappable=handle_ptr(mappable)')
+path.write_text(text)
+PYTHON
+"$PYTHON_FOR_BUILD" - "$opencv_source/modules/python/src2/pycompat.hpp" <<'PYTHON'
+from pathlib import Path
+import re
+import sys
+path = Path(sys.argv[1])
+text, count = re.subn(r"(?<![:\w])Ptr<", "cv::Ptr<", path.read_text())
+assert count == 4, count
+path.write_text(text)
+PYTHON
+"$PYTHON_FOR_BUILD" - "$opencv_source" "$contrib_source" <<'PYTHON'
+from pathlib import Path
+import re
+import sys
+for root in sys.argv[1:]:
+    for path in Path(root).glob('modules/*/misc/python/pyopencv_*.hpp'):
+        text = path.read_text()
+        text = re.sub(r"(?<![:\w])Ptr<", "cv::Ptr<", text)
+        path.write_text(text)
+PYTHON
+build=$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK/opencv
+cmake -S "$opencv_source" -B "$build" -G Ninja \
+	-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SYSTEM_NAME=iOS \
+	-DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" -DCMAKE_OSX_ARCHITECTURES="$ASHELL_ARCH" \
+	-DCMAKE_OSX_DEPLOYMENT_TARGET="$ASHELL_MIN_IOS" -DCMAKE_BUILD_TYPE=Release \
+	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -framework Foundation -framework CoreFoundation -lobjc" -DBUILD_SHARED_LIBS=OFF \
+	-DOPENCV_EXTRA_MODULES_PATH="$contrib_source/modules" \
+	-DAPPLE_FRAMEWORK=OFF -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF \
+	-DENABLE_CCACHE=OFF \
+	-DBUILD_ZLIB=OFF -DZLIB_INCLUDE_DIR="$IOS_SDKROOT/usr/include" -DZLIB_LIBRARY="$IOS_SDKROOT/usr/lib/libz.tbd" \
+	-DBUILD_PNG=OFF -DPNG_PNG_INCLUDE_DIR="$IOS_NATIVE_DIR/libpng.framework/Headers" -DPNG_LIBRARY="$IOS_NATIVE_DIR/libpng.framework/libpng" \
+	-DBUILD_JPEG=OFF -DJPEG_INCLUDE_DIR="$IOS_NATIVE_DIR/include/jpeg" -DJPEG_LIBRARY="$IOS_NATIVE_DIR/lib/libjpeg.a" \
+	-DBUILD_TIFF=OFF -DTIFF_INCLUDE_DIR="$IOS_NATIVE_DIR/include/tiff" -DTIFF_LIBRARY="$IOS_NATIVE_DIR/lib/libtiff.a" \
+	-DBUILD_EXAMPLES=OFF -DBUILD_opencv_apps=OFF -DBUILD_JAVA=OFF \
+	-DBUILD_opencv_python2=OFF -DBUILD_opencv_python3=ON \
+	-DWITH_QT=OFF -DWITH_GTK=OFF -DWITH_COCOA=OFF \
+	-DPYTHON_DEFAULT_EXECUTABLE="$PYTHON_FOR_BUILD" -DPYTHON3_EXECUTABLE="$PYTHON_FOR_BUILD" \
+	-DPYTHON_DEFAULT_AVAILABLE=ON -DPYTHON3INTERP_FOUND=ON -DPYTHON3LIBS_FOUND=ON \
+	-DPYTHON3_VERSION_MAJOR=3 -DPYTHON3_VERSION_MINOR=13 -DPYTHON3_VERSION_STRING=3.13.15 \
+	-DPYTHON3_INCLUDE_DIR="$PYTHON_FRAMEWORK_DIR/Python.framework/Headers" \
+	-DPYTHON3_INCLUDE_PATH="$PYTHON_FRAMEWORK_DIR/Python.framework/Headers" \
+	-DPYTHON3_LIBRARY="$PYTHON_FRAMEWORK_DIR/Python.framework/Python" \
+	-DPYTHON3_NUMPY_INCLUDE_DIRS="$DIRECTORY/numpy/_core/include" \
+	-DPYTHON3_NUMPY_VERSION=2.3.1 \
+	-DPYTHON3_CVPY_SUFFIX=.so
+cmake --build "$build" --target opencv_python3 --parallel 4
+install_site_package cv2/cv2 "$build/lib/python3/cv2.so"

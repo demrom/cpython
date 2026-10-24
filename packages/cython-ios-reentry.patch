@@ -112,3 +112,193 @@ index 0da5cf3..a0cbfec 100644
  }
  
  /////////////// CallNextTpTraverse.proto ///////////////
+--- a/Cython/Utility/CppConvert.pyx
++++ b/Cython/Utility/CppConvert.pyx
+@@ -7,3 +7,3 @@
+-    cdef cppclass string "{{type}}":
+-        string() except +
+-        string(char* c_str, size_t size) except +
++    cdef cppclass __pyx_cpp_string "{{type}}":
++        __pyx_cpp_string() except +
++        __pyx_cpp_string(char* c_str, size_t size) except +
+@@ -13 +13 @@
+-cdef string {{cname}}(object o) except *:
++cdef __pyx_cpp_string {{cname}}(object o) except *:
+@@ -16 +16 @@
+-    return string(data, <size_t> length)
++    return __pyx_cpp_string(data, <size_t> length)
+@@ -22 +22 @@
+-#from libcpp.string cimport string
++#from libcpp.string cimport string as __pyx_cpp_string
+@@ -25 +25 @@
+-    cdef cppclass string "{{type}}":
++    cdef cppclass __pyx_cpp_string "{{type}}":
+@@ -34 +34 @@
+-cdef inline object {{cname.replace("PyObject", py_type, 1)}}(const string& s):
++cdef inline object {{cname.replace("PyObject", py_type, 1)}}(const __pyx_cpp_string& s):
+@@ -45 +45 @@
+-    cdef cppclass vector "std::vector" [T]:
++    cdef cppclass __pyx_cpp_vector "std::vector" [T]:
+@@ -52,3 +52,3 @@
+-cdef vector[X] {{cname}}(object o) except *:
+-
+-    cdef vector[X] v
++cdef __pyx_cpp_vector[X] {{cname}}(object o) except *:
++
++    cdef __pyx_cpp_vector[X] v
+@@ -69 +69 @@
+-    cdef cppclass vector "std::vector" [T]:
++    cdef cppclass __pyx_cpp_vector "std::vector" [T]:
+@@ -75,2 +75,2 @@
+-    list PyList_New(Py_ssize_t size)
+-    int __Pyx_PyList_SET_ITEM(object list, Py_ssize_t i, object o) except -1
++    object PyList_New(Py_ssize_t size)
++    int __Pyx_PyList_SET_ITEM(object pylist, Py_ssize_t i, object o) except -1
+@@ -80 +80 @@
+-cdef object {{cname}}(const vector[X]& v):
++cdef object {{cname}}(const __pyx_cpp_vector[X]& v):
+@@ -100 +100 @@
+-    cdef cppclass cpp_list "std::list" [T]:
++    cdef cppclass __pyx_cpp_list "std::list" [T]:
+@@ -104,2 +104,2 @@
+-cdef cpp_list[X] {{cname}}(object o) except *:
+-    cdef cpp_list[X] l
++cdef __pyx_cpp_list[X] {{cname}}(object o) except *:
++    cdef __pyx_cpp_list[X] l
+@@ -116 +116 @@
+-    cdef cppclass cpp_list "std::list" [T]:
++    cdef cppclass __pyx_cpp_list "std::list" [T]:
+@@ -127,2 +127,2 @@
+-    list PyList_New(Py_ssize_t size)
+-    void __Pyx_PyList_SET_ITEM(object list, Py_ssize_t i, object o)
++    object PyList_New(Py_ssize_t size)
++    void __Pyx_PyList_SET_ITEM(object pylist, Py_ssize_t i, object o)
+@@ -132 +132 @@
+-cdef object {{cname}}(const cpp_list[X]& v):
++cdef object {{cname}}(const __pyx_cpp_list[X]& v):
+@@ -140 +140 @@
+-    cdef cpp_list[X].const_iterator iter = v.begin()
++    cdef __pyx_cpp_list[X].const_iterator iter = v.begin()
+@@ -155 +155 @@
+-    cdef cppclass set "std::{{maybe_unordered}}set" [T]:
++    cdef cppclass __pyx_cpp_set "std::{{maybe_unordered}}set" [T]:
+@@ -159,2 +159,2 @@
+-cdef set[X] {{cname}}(object o) except *:
+-    cdef set[X] s
++cdef __pyx_cpp_set[X] {{cname}}(object o) except *:
++    cdef __pyx_cpp_set[X] s
+@@ -171 +171 @@
+-    cdef cppclass cpp_set "std::{{maybe_unordered}}set" [T]:
++    cdef cppclass __pyx_cpp_set "std::{{maybe_unordered}}set" [T]:
+@@ -180 +180 @@
+-cdef object {{cname}}(const cpp_set[X]& s):
++cdef object {{cname}}(const __pyx_cpp_set[X]& s):
+@@ -186,6 +186,6 @@
+-    cdef cppclass pair "std::pair" [T, U]:
+-        pair() except +
+-        pair(T&, U&) except +
+-
+-@cname("{{cname}}")
+-cdef pair[X,Y] {{cname}}(object o) except *:
++    cdef cppclass __pyx_cpp_pair "std::pair" [T, U]:
++        __pyx_cpp_pair() except +
++        __pyx_cpp_pair(T&, U&) except +
++
++@cname("{{cname}}")
++cdef __pyx_cpp_pair[X,Y] {{cname}}(object o) except *:
+@@ -193 +193 @@
+-    return pair[X,Y](<X>x, <Y>y)
++    return __pyx_cpp_pair[X,Y](<X>x, <Y>y)
+@@ -199 +199 @@
+-    cdef cppclass pair "std::pair" [T, U]:
++    cdef cppclass __pyx_cpp_pair "std::pair" [T, U]:
+@@ -204 +204 @@
+-cdef object {{cname}}(const pair[X,Y]& p):
++cdef object {{cname}}(const __pyx_cpp_pair[X,Y]& p):
+@@ -211,11 +211,9 @@
+-    cdef cppclass pair "std::pair" [T, U]:
+-        pair(T&, U&) except +
+-    cdef cppclass map "std::{{maybe_unordered}}map" [T, U]:
+-        void insert(pair[T, U]&) except +
+-    cdef cppclass vector "std::vector" [T]:
+-        pass
+-
+-
+-@cname("{{cname}}")
+-cdef map[X,Y] {{cname}}(object o) except *:
+-    cdef map[X,Y] m
++    cdef cppclass __pyx_cpp_pair "std::pair" [T, U]:
++        __pyx_cpp_pair(T&, U&) except +
++    cdef cppclass __pyx_cpp_map "std::{{maybe_unordered}}map" [T, U]:
++        void insert(__pyx_cpp_pair[T, U]&) except +
++
++
++@cname("{{cname}}")
++cdef __pyx_cpp_map[X,Y] {{cname}}(object o) except *:
++    cdef __pyx_cpp_map[X,Y] m
+@@ -223 +221 @@
+-        m.insert(pair[X,Y](<X>key, <Y>value))
++        m.insert(__pyx_cpp_pair[X,Y](<X>key, <Y>value))
+@@ -234 +232 @@
+-    cdef cppclass map "std::{{maybe_unordered}}map" [T, U]:
++    cdef cppclass __pyx_cpp_map "std::{{maybe_unordered}}map" [T, U]:
+@@ -246 +244 @@
+-cdef object {{cname}}(const map[X,Y]& s):
++cdef object {{cname}}(const __pyx_cpp_map[X,Y]& s):
+@@ -248,2 +246,2 @@
+-    cdef const map[X,Y].value_type *key_value
+-    cdef map[X,Y].const_iterator iter = s.begin()
++    cdef const __pyx_cpp_map[X,Y].value_type *key_value
++    cdef __pyx_cpp_map[X,Y].const_iterator iter = s.begin()
+@@ -259,9 +257,11 @@
+-cdef extern from *:
+-    cdef cppclass std_complex "std::complex" [T]:
+-        std_complex()
+-        std_complex(T, T) except +
+-
+-@cname("{{cname}}")
+-cdef std_complex[X] {{cname}}(object o) except *:
+-    cdef double complex z = o
+-    return std_complex[X](<X>z.real, <X>z.imag)
++cimport cython
++
++cdef extern from *:
++    cdef cppclass __pyx_cpp_std_complex "std::complex" [T]:
++        __pyx_cpp_std_complex()
++        __pyx_cpp_std_complex(T, T) except +
++
++@cname("{{cname}}")
++cdef __pyx_cpp_std_complex[X] {{cname}}(object o) except *:
++    cdef cython.doublecomplex z = o
++    return __pyx_cpp_std_complex[X](<X>z.real, <X>z.imag)
+@@ -272,2 +272,4 @@
+-cdef extern from *:
+-    cdef cppclass std_complex "std::complex" [T]:
++cimport cython
++
++cdef extern from *:
++    cdef cppclass __pyx_cpp_std_complex "std::complex" [T]:
+@@ -278,4 +280,4 @@
+-cdef object {{cname}}(const std_complex[X]& z):
+-    cdef double complex tmp
+-    tmp.real = <double>z.real()
+-    tmp.imag = <double>z.imag()
++cdef object {{cname}}(const __pyx_cpp_std_complex[X]& z):
++    cdef cython.doublecomplex tmp
++    tmp.real = <cython.double>z.real()
++    tmp.imag = <cython.double>z.imag()
+--- a/Cython/Utility/UFuncs.pyx
++++ b/Cython/Utility/UFuncs.pyx
+@@ -4 +4 @@
+-    ctypedef int npy_intp
++    ctypedef int __pyx_npy_intp "npy_intp"
+@@ -10,3 +10,3 @@
+-cdef void {{func_cname}}(char **args, const npy_intp *dimensions, const npy_intp* steps, void* data) except * {{"nogil" if will_be_called_without_gil else ""}}:
+-    cdef npy_intp i
+-    cdef npy_intp n = dimensions[0]
++cdef void {{func_cname}}(char **args, const __pyx_npy_intp *dimensions, const __pyx_npy_intp* steps, void* data) except * {{"nogil" if will_be_called_without_gil else ""}}:
++    cdef __pyx_npy_intp i
++    cdef __pyx_npy_intp n = dimensions[0]
+@@ -22 +22 @@
+-    cdef npy_intp step_{{idx}} = steps[{{idx}}]
++    cdef __pyx_npy_intp step_{{idx}} = steps[{{idx}}]

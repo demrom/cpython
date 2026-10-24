@@ -1,145 +1,57 @@
-#! /bin/sh
+#!/bin/bash
+set -euo pipefail
 
-# Changed install prefix so multiple install coexist
-export PREFIX=$PWD
-export XCFRAMEWORKS_DIR=$PREFIX/Python-aux/
-# $PREFIX/Library/bin so that the new python is in the path, 
-# ~/.cargo/bin for rustc
-export PATH=$PREFIX/Library/bin:~/.cargo/bin:$PATH
-export PYTHONPYCACHEPREFIX=$PREFIX/__pycache__
-export OSX_SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-export IOS_SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
-export DEBUG="-O3 -g -Wall"
-export CYTHON_OPTIONS="-DCYTHON_PEP489_MULTI_PHASE_INIT=0 -DCYTHON_USE_DICT_VERSIONS=0 -DCYTHON_USE_PYTYPE_LOOKUP=0"
-# export DEBUG="-O3 -g -Wall"
-# TODO: remove -3.13 from $PREFIX/build directories, use $ARCH in directory names.
-# export ARCH=$(uname -m)
-# Loading different set of frameworks based on the Application:
-APP=$(basename `dirname $PWD`)
-#
-# Set to 1 if you have gfortran for arm64 installed. gfortran support is highly experimental.
-# You might need to edit the script as well.
-USE_FORTRAN=0
-if [ -e "/usr/local/aarch64-apple-darwin20/lib/libgfortran.dylib" ];then
-	USE_FORTRAN=1
-fi
-
-PYTHON_VER=3.13
-CODESIGNING_FOLDER_PATH=$PREFIX/iOS
-PRODUCT_BUNDLE_IDENTIFIER=Nicolas-Holzschuch
-
-# This function is for creating frameworks for site-packages Python modules (the ones in .../lib/python3.13/site-packages/
-install_site_package () {
-	DIRECTORY=$PREFIX/Library/lib/python3.13/site-packages
-	PACKAGE=$1
-	LIBRARY=$2
-
-	FULL_MODULE_NAME=Python-$(echo $PACKAGE | tr "/" ".")
-
-	# A bundle identifier; not actually used, but required by Xcode framework packaging
-	FRAMEWORK_BUNDLE_ID=$(echo $PRODUCT_BUNDLE_IDENTIFIER.$FULL_MODULE_NAME | tr "_" "-" | sed "s/^\.//")
-	# The name of the framework folder.
-	FRAMEWORK_FOLDER="Frameworks/$FULL_MODULE_NAME.framework"
-	
-	# If the framework folder doesn't exist, create it.
-	if [ ! -d "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER" ]; then
-		echo "Creating framework for $PACKAGE"
-		mkdir -p "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER"
-		cp "$CODESIGNING_FOLDER_PATH/dylib-Info-template.plist" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace CFBundleExecutable -string "$FULL_MODULE_NAME" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace CFBundleIdentifier -string "$FRAMEWORK_BUNDLE_ID" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		# Mine:
-		plutil -replace CFBundleName -string $FULL_MODULE_NAME "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTPlatformName -string "iphoneos" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTSDKName -string "iphoneos" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace DTPlatformVersion -string "14.0" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-		plutil -replace MinimumOSVersion -string "14.0" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/Info.plist"
-	fi
-
-	echo "Installing binary for $FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	cp "$LIBRARY" "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	# change framework id:
-	install_name_tool -id @rpath/$FULL_MODULE_NAME.framework/$FULL_MODULE_NAME "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME"
-	# Create a placeholder .fwork file where the .so is supposed to be:
-	echo "$FRAMEWORK_FOLDER/$FULL_MODULE_NAME" > $DIRECTORY/$PACKAGE.cpython-313-iphoneos.fwork 
-	# Create a back reference to the .so file location in the framework (relative to PYTHONHOME, which is $APPDIR/Library)
-	# This is currently not used in the code, AFAICS.
-	LOCAL_LIBRARY=$(echo $DIRECTORY | sed "s|$PREFIX/Library/||")
-	echo $LOCAL_LIBRARY/$PACKAGE.cpython-313-iphoneos.so > "$CODESIGNING_FOLDER_PATH/$FRAMEWORK_FOLDER/$FULL_MODULE_NAME.origin"
-}
-
-# end boilerplate
-#
-pushd packages
-pushd coremltools
-mkdir -p build_ios
-rm -rf  build_ios/* 
-# There are some libraries in deps/, too:
-find . -type f -name \*.so -delete
-BUILD_TAG=$(python3.13 ./scripts/build_tag.py)
-# We need to build deps/kmeans1d/_core.cpython-313-darwin.so separately
-# The build process uses the MacOSX SDK, and it's less efforts to compile the single file than to change the build process:
-pushd deps/kmeans1d/
-clang++ -fno-strict-overflow -Wsign-compare -Wunreachable-code \
-	-DNDEBUG -isysroot ${IOS_SDKROOT} \
-	-arch arm64 -target arm64-apple-darwin19.6.0 \
-	-O2 -D_LIBCPP_STRING_H_HAS_CONST_OVERLOADS -miphoneos-version-min=14 \
-	-I$PREFIX  -I$PREFIX/Include -c kmeans1d/_core.cpp \
-	-o build/temp.macosx-11.5-x86_64-cpython-313/kmeans1d/_core.o -std=c++11
-clang++ -arch arm64 -target arm64-apple-darwin19.6.0 \
-	-fno-strict-overflow -Wsign-compare -Wunreachable-code \
-	-DNDEBUG -O3 -Wall \
-	-isysroot ${IOS_SDKROOT} -DPYEXPATNS_H -v -undefined error -dynamiclib \
-	 -lz -undefined error -dynamiclib \
-	 -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python \
-	 -miphoneos-version-min=14 -F$PREFIX/Frameworks_iphoneos -framework ios_system\
-	 build/temp.macosx-11.5-x86_64-cpython-313/kmeans1d/_core.o \
-	-o build/lib.macosx-11.5-x86_64-cpython-313/kmeans1d/_core.cpython-313-darwin.so
-cp build/lib.macosx-11.5-x86_64-cpython-313/kmeans1d/_core.cpython-313-darwin.so kmeans1d/_core.cpython-313-darwin.so
-file kmeans1d/_core.cpython-313-darwin.so
-popd
-pushd build_ios
-# Now compile. This is extracted from scripts/build.sh
-cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
- -DCMAKE_BUILD_TYPE="Release" \
- -DPYTHON_EXECUTABLE:FILEPATH=$PREFIX/Library/bin/python3.13 \
- -DPYTHON_INCLUDE_DIR=$PREFIX/Library/include/python3.13 \
- -DPYTHON_LIBRARY=$PREFIX/Library/lib/libpython3.13.dylib \
- -DOVERWRITE_PB_SOURCE=0 \
- -DBUILD_TAG=$BUILD_TAG \
- -DCMAKE_CROSSCOMPILING=TRUE \
- -DCMAKE_OSX_SYSROOT=${IOS_SDKROOT} \
- -DCMAKE_C_FLAGS="-arch arm64 -target arm64-apple-darwin19.6.0 -O2 -D_LIBCPP_STRING_H_HAS_CONST_OVERLOADS -miphoneos-version-min=14 -I$PREFIX " \
- -DCMAKE_CXX_FLAGS="-arch arm64 -target arm64-apple-darwin19.6.0 -O2 -D_LIBCPP_STRING_H_HAS_CONST_OVERLOADS -miphoneos-version-min=14 -I$PREFIX " \
- -DCMAKE_MODULE_LINKER_FLAGS="-nostdlib -O2 -lobjc -lc -lc++ -undefined error -dynamiclib -isysroot $IOS_SDKROOT -lz  -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python -miphoneos-version-min=14 -F$PREFIX/Frameworks_iphoneos -framework ios_system -framework Accelerate -framework Metal -L$PREFIX/build/lib.darwin-arm64-3.13 $DEBUG" \
- -DCMAKE_SHARED_LINKER_FLAGS="-nostdlib -O2 -lobjc -lc -lc++ -undefined error -dynamiclib -isysroot $IOS_SDKROOT -lz  -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python -miphoneos-version-min=14 -F$PREFIX/Frameworks_iphoneos -framework ios_system -framework Accelerate -framework Metal -L$PREFIX/build/lib.darwin-arm64-3.13 $DEBUG" \
- -DCMAKE_EXE_LINKER_FLAGS="-nostdlib -O2 -lobjc -lc -lc++ -undefined error -dynamiclib -isysroot $IOS_SDKROOT -lz  -F $PREFIX/ios/Frameworks/arm64-iphoneos -framework Python -miphoneos-version-min=14 -F$PREFIX/Frameworks_iphoneos -framework ios_system -framework Accelerate -framework Metal -L$PREFIX/build/lib.darwin-arm64-3.13 $DEBUG" \
- .. 
-# 1st make, will conclude in error:
-make
-# copy OSX protoc to fool make:
-cp ../build_osx/deps/protobuf/cmake/protoc ./deps/protobuf/cmake/protoc
-# 2nd make, will work:
-make
-make dist
-cp dist/coremltools*.whl dist/coremltools.zip
-pushd dist
-unzip coremltools.zip
-for library in coremltools/libcoremlpython.so \
-	coremltools/libmodelpackage.so \
-	coremltools/libmilstoragepython.so 
-do
-	libname=`basename $library .so`
-	install_site_package coremltools/$libname $library 
+source "$(dirname "$0")/ios-package-common.sh"
+prepare_ios_cython
+extract_ios_source coremltools 110b693 6737a767d5d929e311270ffc0cbdf4a713b22c06fbbdc6e59b4baf041c1f2666 https://github.com/holzschu/coremltools/archive/110b693644d6d7f1baa55040697df31dd58981f7.tar.gz
+configure_ios_setup
+host_build=$PREFIX/build-coreml-host
+target_build=$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK/coremltools
+# Protobuf generators execute on the build host, not on the selected iOS target.
+env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u LDSHARED -u LDCXXSHARED -u SDKROOT \
+cmake --fresh -S "$IOS_SOURCE_DIR" -B "$host_build" -G Ninja \
+	-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release \
+	-DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
+	-DCMAKE_C_FLAGS= -DCMAKE_CXX_FLAGS= -DCMAKE_EXE_LINKER_FLAGS= -DCMAKE_SHARED_LINKER_FLAGS= \
+	-DHAS_CCACHE=HAS_CCACHE-NOTFOUND \
+	-DPYTHON_EXECUTABLE="$PYTHON_FOR_BUILD" -DOVERWRITE_PB_SOURCE=OFF
+env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u LDSHARED -u LDCXXSHARED -u SDKROOT \
+cmake --build "$host_build" --target protoc enumgen --parallel 4
+"$PYTHON_FOR_BUILD" - "$IOS_SOURCE_DIR" "$host_build" <<'PY'
+from pathlib import Path
+import sys
+root, host = map(Path, sys.argv[1:])
+path = root / 'cmake/coreml-utils.cmake'
+text = path.read_text()
+for old, new in [('${CMAKE_BINARY_DIR}/deps/protobuf/cmake/protoc', str(host / 'deps/protobuf/cmake/protoc')), ('--plugin=protoc-gen-enum=mlmodel/enumgen', '--plugin=protoc-gen-enum=' + str(host / 'mlmodel/enumgen')), ('DEPENDS enumgen protoc', 'DEPENDS ' + str(host / 'mlmodel/enumgen') + ' ' + str(host / 'deps/protobuf/cmake/protoc')), ('DEPENDS protoc', 'DEPENDS ' + str(host / 'deps/protobuf/cmake/protoc'))]:
+    assert old in text
+    text = text.replace(old, new)
+path.write_text(text)
+path = root / 'CMakeLists.txt'
+text = path.read_text()
+assert '-undefined dynamic_lookup' in text
+path.write_text(text.replace('-undefined dynamic_lookup', '-undefined error'))
+PY
+# CMake's Python discovery must see target headers and framework, while its
+# executable remains the host interpreter used for source generation.
+cmake -S "$IOS_SOURCE_DIR" -B "$target_build" -G Ninja \
+	-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SYSTEM_NAME=iOS \
+	-DCMAKE_OSX_SYSROOT="$IOS_SDKROOT" -DCMAKE_OSX_ARCHITECTURES="$ASHELL_ARCH" \
+	-DCMAKE_OSX_DEPLOYMENT_TARGET="$ASHELL_MIN_IOS" -DCMAKE_BUILD_TYPE=Release \
+	-DHAS_CCACHE=HAS_CCACHE-NOTFOUND \
+	-DPYTHON_EXECUTABLE="$PYTHON_FOR_BUILD" \
+	-DPYTHON_INCLUDE_DIR="$PYTHON_FRAMEWORK_DIR/Python.framework/Headers" \
+	-DPYTHON_LIBRARY="$PYTHON_FRAMEWORK_DIR/Python.framework/Python" \
+	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -framework Accelerate" -DOVERWRITE_PB_SOURCE=OFF
+cmake --build "$target_build" --target coremlpython milstoragepython modelpackage --parallel 4
+mkdir -p "$DIRECTORY/coremltools/_deps/kmeans1d"
+cp -R "$IOS_SOURCE_DIR/coremltools/" "$DIRECTORY/coremltools/"
+# kmeans1d is a single bundled extension with no platform-specific dependencies.
+# shellcheck disable=SC2086
+clang++ $CFLAGS -std=c++11 -dynamiclib -undefined error $LDFLAGS \
+	"$IOS_SOURCE_DIR/deps/kmeans1d/kmeans1d/_core.cpp" -o "$target_build/kmeans1d.so"
+install_site_package coremltools/_deps/kmeans1d/_core "$target_build/kmeans1d.so"
+for name in coremlpython milstoragepython modelpackage; do
+	install_site_package "coremltools/lib$name" "$IOS_SOURCE_DIR/coremltools/lib$name.so"
 done
-for library in coremltools/_deps/kmeans1d/_core.cpython-313-darwin.so
-do
-	directory=`dirname $library`
-	libname=`basename $library .cpython-313-darwin.so`
-	install_site_package $directory/$libname $library 
-done
-popd  >> $PREFIX/make_ios.log 2>&1
-popd  >> $PREFIX/make_ios.log 2>&1
-popd  >> $PREFIX/make_ios.log 2>&1
-popd  >> $PREFIX/make_ios.log 2>&1
-
+find "$DIRECTORY/coremltools" -name '*.so' -delete
