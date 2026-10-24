@@ -15,7 +15,7 @@ rm -rf "$scipy_source"
 mkdir -p "$scipy_source"
 tar -xzf "$archive" --strip-components 1 -C "$scipy_source"
 patch -p1 -f -d "$scipy_source" -i "$IOS_PACKAGE_ROOT/packages/scipy-flang-ios.patch"
-meson setup --wipe "$MESON_BUILD_DIR" "$scipy_source" --cross-file "$MESON_CROSS_FILE" \
+meson setup --wipe "$MESON_BUILD_DIR" "$scipy_source" --cross-file "$MESON_CROSS_FILE" --native-file "$MESON_NATIVE_FILE" \
 	--prefix "$PREFIX/Library" --buildtype release -Duse-pythran=false -Dblas=openblas -Dlapack=openblas
 meson compile -C "$MESON_BUILD_DIR" -j 4
 # Compiler string constants may be weak/coalescable; private procedures and COMMON blocks must not overlap.

@@ -15,6 +15,7 @@ from scipy.optimize.cython_optimize import _zeros
 from scipy.sparse.linalg import svds
 
 assert np.__version__ == "2.3.1"
+np.testing.assert_allclose(np.random.default_rng(0).random(3), [0.6369616873214543, 0.2697867137638703, 0.04097352393619469])
 np.testing.assert_allclose(np.linalg.solve([[3.0, 1.0], [1.0, 2.0]], [9.0, 8.0]), [2.0, 3.0])
 np.testing.assert_allclose(np.linalg.eigvalsh([[2.0, 1.0], [1.0, 2.0]]), [1.0, 3.0])
 np.testing.assert_allclose(np.linalg.cholesky([[4.0, 2.0], [2.0, 5.0]]), [[2.0, 0.0], [1.0, 2.0]])
@@ -45,3 +46,24 @@ np.testing.assert_allclose(signal.convolve([1, 2], [1, 1]), [1, 3, 2])
 assert "brentq" in _zeros.__pyx_capi__
 assert callable(io.mmread) and callable(odr.ODR)
 print("SciPy statistics, optimization, signal, IO and ODR imports PASS", flush=True)
+
+import pandas as pd
+
+assert pd.__version__ == "3.1.0"
+frame = pd.DataFrame({"key": ["a", "a", "b"], "value": [1, 2, 3]})
+assert frame.groupby("key")["value"].sum().tolist() == [3, 3]
+np.testing.assert_allclose(pd.Series([1.0, 2.0, 3.0]).rolling(2).mean()[1:], [1.5, 2.5])
+assert pd.Timestamp("2026-01-02").day == 2
+assert pd.Series([3.0, 1.0, 2.0]).rank().tolist() == [3.0, 1.0, 2.0]
+print("Pandas groupby, rolling, Timestamp and rank PASS", flush=True)
+
+import pickle
+import shapely
+from shapely.geometry import LinearRing, Point, box
+
+assert shapely.__version__ == "2.2.0"
+assert box(0, 0, 2, 2).union(box(1, 1, 3, 3)).area == 7.0
+np.testing.assert_allclose(Point(1, 2).buffer(1).area, np.pi, rtol=0.01)
+ring = LinearRing([(0, 0), (1, 0), (1, 1), (0, 0)])
+assert pickle.loads(pickle.dumps(ring)).equals(ring)
+print("Shapely geometry, union, buffer and pickle PASS", flush=True)

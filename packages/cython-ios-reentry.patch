@@ -1,0 +1,114 @@
+diff --git a/Cython/Compiler/ModuleNode.py b/Cython/Compiler/ModuleNode.py
+index 6e0a3e5..2aafb34 100644
+--- a/Cython/Compiler/ModuleNode.py
++++ b/Cython/Compiler/ModuleNode.py
+@@ -2123,23 +2123,11 @@ class ModuleNode(Nodes.Node, Nodes.BlockNode):
+                     code.putln("PyObject_GC_Track(o);")
+                 code.putln("__Pyx_PyType_GetSlot(%s, tp_dealloc, destructor)(o);" % base_cname)
+             else:
+-                if needs_gc:
+-                    # We don't know if the base class uses GC or not, so must find out at runtime
+-                    # whether we should undo the untracking above or not.
+-                    code.putln("if (PyType_IS_GC(%s)) PyObject_GC_Track(o);" % base_cname)
+-                # This is an externally defined type.  Calling through the
+-                # cimported base type pointer directly interacts badly with
+-                # the module cleanup, which may already have cleared it.
+-                # In that case, fall back to traversing the type hierarchy.
+-                # If we're using the module state then always go through the
+-                # type hierarchy, because our access to the module state may
+-                # have been lost (at least for the limited API version of
+-                # using module state).
+-                code.putln("#if !CYTHON_USE_MODULE_STATE")
+-                code.putln("if (likely(%s)) __Pyx_PyType_GetSlot(%s, tp_dealloc, destructor)(o); else" % (
+-                    base_cname, base_cname))
++                # The imported base type pointer may have been cleared during module cleanup.
++                code.putln("#if CYTHON_USE_TYPE_SPECS")
++                code.putln("int base_is_heap =")
+                 code.putln("#endif")
+-                code.putln("__Pyx_call_next_tp_dealloc(o, %s);" % slot_func_cname)
++                code.putln("__Pyx_call_next_tp_dealloc(o, %s, %d);" % (slot_func_cname, needs_gc))
+                 code.globalstate.use_utility_code(
+                     UtilityCode.load_cached("CallNextTpDealloc", "ExtensionTypes.c"))
+ 
+@@ -2149,7 +2137,8 @@ class ModuleNode(Nodes.Node, Nodes.BlockNode):
+                 # (This is what Python does in subtype_dealloc so we should assume it's what
+                 # other well-behaved types do).
+                 code.putln("#if CYTHON_USE_TYPE_SPECS")
+-                code.putln(f"if (!__Pyx_PyType_HasFeature({base_cname}, Py_TPFLAGS_HEAPTYPE)) {{")
++                base_is_heap = f"__Pyx_PyType_HasFeature({base_cname}, Py_TPFLAGS_HEAPTYPE)" if base_type.is_builtin_type else "base_is_heap"
++                code.putln(f"if (!{base_is_heap}) {{")
+                 code.putln("Py_DECREF(tp);")
+                 code.putln("}")
+                 code.putln("#endif")
+@@ -3857,6 +3846,9 @@ class ModuleNode(Nodes.Node, Nodes.BlockNode):
+         code.put_decref_clear(
+             code.name_in_main_c_code_module_state(env.module_dict_cname),
+             py_object_type, nanny=False, clear_before_decref=True)
++        code.putln("#if !CYTHON_USE_MODULE_STATE")
++        code.putln(f"{env.module_cname} = NULL;")
++        code.putln("#endif")
+ 
+     def generate_main_method(self, env, code):
+         module_is_main = self.is_main_module_flag_cname()
+diff --git a/Cython/Compiler/Nodes.py b/Cython/Compiler/Nodes.py
+index ad33575..8eae577 100644
+--- a/Cython/Compiler/Nodes.py
++++ b/Cython/Compiler/Nodes.py
+@@ -1094,10 +1094,15 @@ class CArgDeclNode(Node):
+             self.type_from_annotation = True
+         return arg_type
+ 
++    def _default_is_c_constant(self):
++        default = self.default
++        return default.is_literal or (
++            default.is_name and default.entry.is_const and default.type.is_enum)
++
+     def calculate_default_value_code(self, code):
+         if self.default_value is None:
+             if self.default:
+-                if self.default.is_literal:
++                if self._default_is_c_constant():
+                     # will not output any code, just assign the result_code
+                     self.default.generate_evaluation_code(code)
+                     return self.type.cast_code(self.default.result())
+@@ -1111,7 +1116,7 @@ class CArgDeclNode(Node):
+     def generate_assignment_code(self, code, overloaded_assignment=False,
+                                  cyfunc_struct_target=None):
+         default = self.default
+-        if default is None or (default.is_literal and cyfunc_struct_target is None):
++        if default is None or (self._default_is_c_constant() and cyfunc_struct_target is None):
+             return
+         # Note that even if self.is_dynamic, default may be a literal if it's been
+         # optimized into a literal after analyse_expressions
+diff --git a/Cython/Utility/ExtensionTypes.c b/Cython/Utility/ExtensionTypes.c
+index 0da5cf3..a0cbfec 100644
+--- a/Cython/Utility/ExtensionTypes.c
++++ b/Cython/Utility/ExtensionTypes.c
+@@ -325,11 +325,11 @@ static int __Pyx_PyType_Ready(PyTypeObject *t) {
+ 
+ /////////////// CallNextTpDealloc.proto ///////////////
+ 
+-static void __Pyx_call_next_tp_dealloc(PyObject* obj, destructor current_tp_dealloc);
++static int __Pyx_call_next_tp_dealloc(PyObject* obj, destructor current_tp_dealloc, int untracked);
+ 
+ /////////////// CallNextTpDealloc ///////////////
+ 
+-static void __Pyx_call_next_tp_dealloc(PyObject* obj, destructor current_tp_dealloc) {
++static int __Pyx_call_next_tp_dealloc(PyObject* obj, destructor current_tp_dealloc, int untracked) {
+     PyTypeObject* type = Py_TYPE(obj);
+     destructor tp_dealloc = NULL;
+     /* try to find the first parent type that has a different tp_dealloc() function */
+@@ -337,8 +337,11 @@ static void __Pyx_call_next_tp_dealloc(PyObject* obj, destructor current_tp_deal
+         type = __Pyx_PyType_GetSlot(type, tp_base, PyTypeObject*);
+     while (type && (tp_dealloc = __Pyx_PyType_GetSlot(type, tp_dealloc, destructor)) == current_tp_dealloc)
+         type = __Pyx_PyType_GetSlot(type, tp_base, PyTypeObject*);
+-    if (type)
+-        tp_dealloc(obj);
++    if (!type) return 0;
++    int base_is_heap = __Pyx_PyType_HasFeature(type, Py_TPFLAGS_HEAPTYPE);
++    if (untracked && PyType_IS_GC(type)) PyObject_GC_Track(obj);
++    tp_dealloc(obj);
++    return base_is_heap;
+ }
+ 
+ /////////////// CallNextTpTraverse.proto ///////////////

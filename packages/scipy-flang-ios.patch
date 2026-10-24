@@ -1,5 +1,17 @@
 --- a/meson.build
 +++ b/meson.build
+@@ -42,6 +42,11 @@
+ cy = meson.get_compiler('cython')
+ # generator() doesn't accept compilers, only found programs - cast it.
+ cython = find_program(cy.cmd_array()[0])
++# Preserve interpreter and option arguments from the configured compiler.
++cython_command_args = []
++foreach index : range(1, cy.cmd_array().length())
++  cython_command_args += cy.cmd_array()[index]
++endforeach
+ 
+ # Check compiler is recent enough (see "Toolchain Roadmap" for details)
+ if cc.get_id() == 'gcc'
 @@ -87,6 +87,9 @@
  # Adding at project level causes many spurious -lgfortran flags.
  add_languages('fortran', native: false)
@@ -10,6 +22,35 @@
  if ff.get_id() == 'gcc'
    # -std=legacy is not supported by all Fortran compilers, but very useful with
    # gfortran since it avoids a ton of warnings that we don't care about.
+--- a/scipy/meson.build
++++ b/scipy/meson.build
+@@ -377,7 +377,7 @@
+ #_cython_tree = declare_dependency(sources: [
+ _cython_tree = [fs.copyfile('__init__.py')]
+ 
+-cython_args = ['-3', '--fast-fail', '--output-file', '@OUTPUT@', '--include-dir', '@BUILD_ROOT@', '@INPUT@']
++cython_args = cython_command_args + ['-3', '--fast-fail', '--output-file', '@OUTPUT@', '--include-dir', '@BUILD_ROOT@', '@INPUT@']
+ if cy.version().version_compare('>=3.1.0')
+   cython_args += ['-Xfreethreading_compatible=True']
+ 
+@@ -385,7 +385,7 @@
+     install: false,
+     output: '_cyutility.c',
+     command: [
+-      cython, '-3', '--fast-fail', '-Xfreethreading_compatible=True',
++      cython, cython_command_args, '-3', '--fast-fail', '-Xfreethreading_compatible=True',
+       '--generate-shared=' + meson.current_build_dir()/'_cyutility.c'
+     ],
+   )
+@@ -402,7 +402,7 @@
+ else
+   cython_shared_module = []
+ endif
+-cython_cplus_args = ['--cplus'] + cython_args
++cython_cplus_args = cython_args + ['--cplus']
+ 
+ cython_gen = generator(cython,
+   arguments : cython_args,
 --- a/scipy/integrate/meson.build
 +++ b/scipy/integrate/meson.build
 @@ -75,7 +75,7 @@

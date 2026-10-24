@@ -11,7 +11,53 @@ export ASHELL_MIN_IOS=14.0
 
 products=(Python-numpy.numpy Python-scipy.scipy Python-scipy.optimize.cython_optimize._zeros
 	Python-scipy.special._ellip_harm_2 Python-scipy.special._gufuncs
-	Python-scipy.special._special_ufuncs Python-scipy.special._ufuncs_cxx Python-scipy.special._ufuncs)
+	Python-scipy.special._special_ufuncs Python-scipy.special._ufuncs_cxx Python-scipy.special._ufuncs
+	Python-pandas._libs._cyutility
+	Python-pandas._libs.tslibs.base
+	Python-pandas._libs.tslibs.ccalendar
+	Python-pandas._libs.tslibs.dtypes
+	Python-pandas._libs.tslibs.conversion
+	Python-pandas._libs.tslibs.fields
+	Python-pandas._libs.tslibs.nattype
+	Python-pandas._libs.tslibs.np_datetime
+	Python-pandas._libs.tslibs.offsets
+	Python-pandas._libs.tslibs.parsing
+	Python-pandas._libs.tslibs.period
+	Python-pandas._libs.tslibs.strptime
+	Python-pandas._libs.tslibs.timedeltas
+	Python-pandas._libs.tslibs.timestamps
+	Python-pandas._libs.tslibs.timezones
+	Python-pandas._libs.tslibs.tzconversion
+	Python-pandas._libs.tslibs.vectorized
+	Python-pandas._libs.algos
+	Python-pandas._libs.arrays
+	Python-pandas._libs.groupby
+	Python-pandas._libs.hashing
+	Python-pandas._libs.hashtable
+	Python-pandas._libs.index
+	Python-pandas._libs.indexing
+	Python-pandas._libs.internals
+	Python-pandas._libs.interval
+	Python-pandas._libs.join
+	Python-pandas._libs.lib
+	Python-pandas._libs.missing
+	Python-pandas._libs.pandas_datetime
+	Python-pandas._libs.pandas_parser
+	Python-pandas._libs.parsers
+	Python-pandas._libs._ujson
+	Python-pandas._libs.ops
+	Python-pandas._libs.ops_dispatch
+	Python-pandas._libs.properties
+	Python-pandas._libs.reshape
+	Python-pandas._libs.sas
+	Python-pandas._libs.byteswap
+	Python-pandas._libs.sparse
+	Python-pandas._libs.tslib
+	Python-pandas._libs.testing
+	Python-pandas._libs.writers
+	Python-pandas._libs.window.aggregations
+	Python-pandas._libs.window.indexers
+	Python-shapely.lib Python-shapely._geos Python-shapely._geometry_helpers)
 for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
 	export ASHELL_SDK=${target%%-*} ASHELL_ARCH=arm64
 	[[ $target != iphonesimulator-x86_64 ]] || ASHELL_ARCH=x86_64
@@ -23,14 +69,17 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
 	[[ $ASHELL_SDK != iphonesimulator ]] || slice=ios-arm64_x86_64-simulator
 	mkdir -p "$PREFIX/packages" "$IOS_NATIVE_DIR"
 	ln -sfn "$source_root/packages/numpy" "$PREFIX/packages/numpy"
-	for name in openblas flang_rt; do
+	for name in openblas flang_rt libgeos libgeos_c; do
 		ln -sfn "$native_root/$name.xcframework/$slice/$name.framework" "$IOS_NATIVE_DIR/$name.framework"
 	done
 	ln -sfn "$core_root/ios-system-$target/Build/Products/Release-$ASHELL_SDK/ios_system.framework" "$IOS_NATIVE_DIR/ios_system.framework"
 	bash "$source_root/scripts/numpyPackages_iOS.sh"
 	bash "$source_root/scripts/scipyPackages_iOS.sh"
+	bash "$source_root/scripts/pandasMesonPackages_iOS.sh"
+	bash "$source_root/scripts/shapelyPackages_iOS.sh"
 	for name in "${products[@]}"; do test -f "$PREFIX/iOS/Frameworks/$name.framework/$name"; done
-	test "$(ls -d "$PREFIX/iOS/Frameworks/"*.framework | wc -l | tr -d ' ')" = 8
+	frameworks=("$PREFIX/iOS/Frameworks/"*.framework)
+	test "${#frameworks[@]}" = 56
 done
 
 mkdir -p "$build_root/universal" "$build_root/dist"
@@ -65,7 +114,7 @@ for name in "${products[@]}"; do
 		while IFS= read -r dependency; do
 			case "$dependency" in /usr/lib/*|/System/Library/*) continue ;; esac
 			allowed=0
-			for product in Python ios_system openblas flang_rt "${products[@]}"; do
+			for product in Python ios_system openblas flang_rt libgeos libgeos_c "${products[@]}"; do
 				[[ $dependency != "@rpath/$product.framework/$product" ]] || allowed=1
 			done
 			test "$allowed" = 1 || { echo "Unpackaged dependency: $dependency" >&2; exit 1; }

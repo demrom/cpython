@@ -9,8 +9,7 @@
 	url = https://github.com/holzschu/numpy.git
 [submodule "packages/cython"]
 	path = packages/cython
-	url = https://github.com/holzschu/cython.git
-	branch = 0.29.x
+	url = https://github.com/cython/cython.git
 [submodule "packages/matplotlib"]
 	path = packages/matplotlib
 	url = https://github.com/holzschu/matplotlib.git

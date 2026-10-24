@@ -4,12 +4,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/ios-package-common.sh"
 
 configure_meson_python() {
 	local package=$1 numpy_include=${2:-} cpu=$ASHELL_ARCH compiler openblas_version longdouble_format=IEEE_DOUBLE_LE
-	local tools=$IOS_PACKAGE_ROOT/.build/science-tools cython_source=$IOS_PACKAGE_ROOT/packages/cython pybind_source=$IOS_PACKAGE_ROOT/packages/pybind11
-	test "$(git -C "$cython_source" rev-parse HEAD)" = 6dfd73df3c03ba0633ec95be066bf17bed36fe0c
+	local tools=$IOS_PACKAGE_ROOT/.build/science-tools pybind_source=$IOS_PACKAGE_ROOT/packages/pybind11
+	local cython_source=$tools/cython-source
+	test "$(git -C "$IOS_PACKAGE_ROOT/packages/cython" rev-parse HEAD)" = bcd04a2966842d80de6ecff4e68e8d892bec5ef7
 	test "$(git -C "$pybind_source" rev-parse HEAD)" = 86eaeb338d7211c6d687ad27a66eae55855bd6ad
 	[[ $(flang --version) =~ version\ 23\. ]] || { echo "Flang 23 required" >&2; exit 1; }
 	test -f "$tools/bin/python" || uv venv --python 3.13.15 "$tools"
 	uv pip install --python "$tools/bin/python" -r "$IOS_PACKAGE_ROOT/scripts/requirements-ios-science.txt"
+	rm -rf "$cython_source"
+	mkdir -p "$cython_source"
+	git -C "$IOS_PACKAGE_ROOT/packages/cython" archive HEAD | tar -x -C "$cython_source"
+	# Cython #8082, #8083 and #8084: constant defaults and cleanup-safe re-entry.
+	patch -p1 -f -d "$cython_source" -i "$IOS_PACKAGE_ROOT/packages/cython-ios-reentry.patch"
 	NO_CYTHON_COMPILE=true uv pip install --no-build-isolation --no-cache --reinstall-package cython --reinstall-package pybind11 --python "$tools/bin/python" "$cython_source" "$pybind_source"
 	export PATH=$tools/bin:$PATH PYTHON_FOR_BUILD=$tools/bin/python
 	[[ $cpu != arm64 ]] || cpu=aarch64
@@ -23,6 +29,7 @@ configure_meson_python() {
 	MESON_BUILD_DIR=$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK/$package
 	MESON_CROSSENV=$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK/crossenv
 	MESON_CROSS_FILE=$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK/science.meson
+	MESON_NATIVE_FILE=$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK/cython-native.ini
 	mkdir -p "$MESON_BUILD_DIR" "$IOS_NATIVE_DIR/lib/pkgconfig"
 	"$PYTHON_FOR_BUILD" -m crossenv "$PYTHON_FRAMEWORK_DIR/Python.framework/Python" "$MESON_CROSSENV" \
 		--clear-both --without-pip --system-site-packages --sysconfigdata-file "$PYTHON_SYSCONFIGDATA" \
@@ -43,14 +50,20 @@ Version: $openblas_version
 Cflags: -I$IOS_NATIVE_DIR/openblas.framework/Headers
 Libs: -F$IOS_NATIVE_DIR -framework openblas
 EOF
-	export PKG_CONFIG_LIBDIR=$IOS_NATIVE_DIR/lib/pkgconfig PKG_CONFIG_PATH=
+	export PKG_CONFIG_LIBDIR=$IOS_NATIVE_DIR/lib/pkgconfig:$DIRECTORY/numpy/_core/lib/pkgconfig PKG_CONFIG_PATH=
+	local cython_binary="['$tools/bin/python', '-m', 'cython', '--cleanup', '3']"
+	# Meson needs the same Cython command for build and target extension modules.
+	cat > "$MESON_NATIVE_FILE" <<EOF
+[binaries]
+cython = $cython_binary
+EOF
 	cat > "$MESON_CROSS_FILE" <<EOF
 [binaries]
 c = ['xcrun', '--sdk', '$ASHELL_SDK', 'clang']
 cpp = ['xcrun', '--sdk', '$ASHELL_SDK', 'clang++']
 fortran = '$(command -v flang)'
 python = '$MESON_CROSSENV/cross/bin/python'
-cython = '$(command -v cython)'
+cython = $cython_binary
 pkg-config = '$(command -v pkg-config)'
 strip = '/usr/bin/strip'
 [host_machine]
@@ -65,8 +78,8 @@ EOF
 	[[ -z $numpy_include ]] || printf "numpy-include-dir = '%s'\n" "$numpy_include" >> "$MESON_CROSS_FILE"
 	cat >> "$MESON_CROSS_FILE" <<EOF
 [built-in options]
-c_args = ['-target', '$IOS_TRIPLE', '-isysroot', '$IOS_SDKROOT', '-DCYTHON_PEP489_MULTI_PHASE_INIT=0', '-DCYTHON_USE_DICT_VERSIONS=0', '-DCYTHON_USE_PYTYPE_LOOKUP=0']
-cpp_args = ['-target', '$IOS_TRIPLE', '-isysroot', '$IOS_SDKROOT', '-DCYTHON_PEP489_MULTI_PHASE_INIT=0', '-DCYTHON_USE_DICT_VERSIONS=0', '-DCYTHON_USE_PYTYPE_LOOKUP=0']
+c_args = ['-target', '$IOS_TRIPLE', '-isysroot', '$IOS_SDKROOT', '-DCYTHON_PEP489_MULTI_PHASE_INIT=0', '-DCYTHON_USE_MODULE_STATE=0', '-DCYTHON_USE_TYPE_SPECS=1', '-DCYTHON_USE_DICT_VERSIONS=0', '-DCYTHON_USE_PYTYPE_LOOKUP=0']
+cpp_args = ['-target', '$IOS_TRIPLE', '-isysroot', '$IOS_SDKROOT', '-DCYTHON_PEP489_MULTI_PHASE_INIT=0', '-DCYTHON_USE_MODULE_STATE=0', '-DCYTHON_USE_TYPE_SPECS=1', '-DCYTHON_USE_DICT_VERSIONS=0', '-DCYTHON_USE_PYTYPE_LOOKUP=0']
 c_link_args = ['-target', '$IOS_TRIPLE', '-isysroot', '$IOS_SDKROOT', '-F$PYTHON_FRAMEWORK_DIR', '-framework', 'Python', '-F$IOS_NATIVE_DIR', '-framework', 'ios_system', '-framework', 'flang_rt']
 cpp_link_args = ['-target', '$IOS_TRIPLE', '-isysroot', '$IOS_SDKROOT', '-F$PYTHON_FRAMEWORK_DIR', '-framework', 'Python', '-F$IOS_NATIVE_DIR', '-framework', 'ios_system', '-framework', 'flang_rt']
 # Meson's Fortran sanity check uses compile arguments while producing an executable.
