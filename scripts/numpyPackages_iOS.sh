@@ -3,7 +3,11 @@ set -euo pipefail
 
 source "$(dirname "$0")/ios-meson-package-common.sh"
 numpy_source=$PREFIX/packages/numpy
-test "$(git -C "$numpy_source" rev-parse HEAD)" = afe3bd5213b0107009b29cff90bc425e3dd90b82
+numpy_revision=$(git -C "$IOS_PACKAGE_ROOT" rev-parse HEAD:packages/numpy)
+test "$(git -C "$numpy_source" rev-parse HEAD)" = "$numpy_revision" || {
+	echo "NumPy source does not match the pinned submodule revision: $numpy_revision" >&2
+	exit 1
+}
 configure_meson_python numpy
 meson_command=("$PYTHON_FOR_BUILD" "$numpy_source/vendored-meson/meson/meson.py")
 "${meson_command[@]}" setup --wipe "$MESON_BUILD_DIR" "$numpy_source" --cross-file "$MESON_CROSS_FILE" --native-file "$MESON_NATIVE_FILE" \
