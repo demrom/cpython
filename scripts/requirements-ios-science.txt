@@ -2,7 +2,9 @@ crossenv==1.6.2
 meson==1.12.1
 meson-python==0.20.0
 numpy==2.3.1
+scipy==1.16.1
 pip==26.2.1
 setuptools==84.2.1
+setuptools-scm==8.3.1
 wheel==0.48.0
 versioneer[toml]==0.29

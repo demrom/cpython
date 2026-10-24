@@ -2,16 +2,18 @@
 set -euo pipefail
 
 source "$(dirname "$0")/ios-package-common.sh"
+prepare_ios_cython
 
 pushd "$PREFIX/packages/statsmodels"
 rm -rf build
 numpy=$DIRECTORY/numpy/_core
 # Search target NumPy headers and libraries before setuptools' build-host paths.
-env CC="clang $IOS_TARGET_FLAGS" CXX="clang++ $IOS_TARGET_FLAGS" \
-	CFLAGS="$IOS_TARGET_FLAGS -I$numpy/include $CYTHON_OPTIONS" \
-	CXXFLAGS="$IOS_TARGET_FLAGS -I$numpy/include $CYTHON_OPTIONS" \
-	LDSHARED="clang $IOS_TARGET_FLAGS -dynamiclib -undefined error -L$numpy/lib -F$PYTHON_FRAMEWORK_DIR -framework Python" \
-	PLATFORM="$ASHELL_SDK" "$PYTHON_FOR_BUILD" setup.py build --parallel 4
+export CC="clang $IOS_TARGET_FLAGS" CXX="clang++ $IOS_TARGET_FLAGS"
+export CFLAGS="$IOS_TARGET_FLAGS -I$numpy/include $CYTHON_OPTIONS"
+export CXXFLAGS="$IOS_TARGET_FLAGS -I$numpy/include $CYTHON_OPTIONS"
+export LDSHARED="clang $IOS_TARGET_FLAGS -dynamiclib -undefined error -L$numpy/lib -F$PYTHON_FRAMEWORK_DIR -framework Python -F$IOS_NATIVE_DIR -framework ios_system -lz -lc++"
+export PLATFORM=$ASHELL_SDK
+run_ios_setup build --parallel 4
 copy_package_files
 
 # Keep the existing aggregate, excluding three filters that collide with smoothers.
@@ -21,7 +23,7 @@ printf '%s\n' build/temp.*/statsmodels/tsa/statespace/_filters/_inversions.o >> 
 # shellcheck disable=SC2086 # IOS_TARGET_FLAGS is a compiler argument list.
 clang $IOS_TARGET_FLAGS -dynamiclib -undefined error -Wl,-filelist,"$filelist" \
 	-F"$PYTHON_FRAMEWORK_DIR" -framework Python -L"$numpy/lib" -lnpymath \
-	-L"$DIRECTORY/numpy/random/lib" -lnpyrandom -lm -o build/statsmodels.so
+	-L"$DIRECTORY/numpy/random/lib" -lnpyrandom -F"$IOS_NATIVE_DIR" -framework ios_system -lz -lm -lc++ -o build/statsmodels.so
 install_site_package statsmodels/statsmodels build/statsmodels.so
 while IFS= read -r library; do
 	module=${library#build/lib.*/}

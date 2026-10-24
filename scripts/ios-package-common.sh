@@ -29,6 +29,30 @@ PRODUCT_BUNDLE_IDENTIFIER=Nicolas-Holzschuch
 DIRECTORY=$PREFIX/Library/lib/python3.13/site-packages
 mkdir -p "$DIRECTORY"
 
+prepare_ios_cython() {
+	local tools=$IOS_PACKAGE_ROOT/.build/science-tools archive cython_source
+	archive=$tools/cython-bcd04a2.tar.gz
+	cython_source=$tools/cython-source
+	test -f "$tools/bin/python" || uv venv --python 3.13.15 "$tools"
+	uv pip install --python "$tools/bin/python" -r "$IOS_PACKAGE_ROOT/scripts/requirements-ios-science.txt"
+	if [[ ! -f $archive ]]; then
+		curl -fL --retry 3 https://github.com/cython/cython/archive/bcd04a2966842d80de6ecff4e68e8d892bec5ef7.tar.gz -o "$archive"
+	fi
+	printf '%s  %s\n' 59f060b075908af9a398052ac6d869f68db1c40f211a111cb5fa6ecda14d0c7b "$archive" | shasum -a 256 -c -
+	rm -rf "$cython_source"
+	mkdir -p "$cython_source"
+	tar -xzf "$archive" --strip-components=1 -C "$cython_source"
+	# Cython #8082, #8083 and #8084: constant defaults and cleanup-safe re-entry.
+	patch -p1 -f -d "$cython_source" -i "$IOS_PACKAGE_ROOT/packages/cython-ios-reentry.patch"
+	NO_CYTHON_COMPILE=true uv pip install --no-build-isolation --no-cache --reinstall-package cython --python "$tools/bin/python" "$cython_source"
+	export PATH=$tools/bin:$PATH PYTHON_FOR_BUILD=$tools/bin/python
+	export CYTHON_OPTIONS="$CYTHON_OPTIONS -DCYTHON_USE_TYPE_SPECS=1 -DCYTHON_USE_MODULE_STATE=0"
+}
+
+run_ios_setup() {
+	"$PYTHON_FOR_BUILD" -c 'import runpy, sys; from Cython.Compiler import Options; Options.generate_cleanup_code = 3; sys.argv = ["setup.py", *sys.argv[1:]]; runpy.run_path("setup.py", run_name="__main__")' "$@"
+}
+
 copy_package_files() {
 	local directory
 	for directory in build/lib.*; do

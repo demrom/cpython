@@ -6,18 +6,10 @@ configure_meson_python() {
 	local package=$1 numpy_include=${2:-} cpu=$ASHELL_ARCH compiler openblas_version longdouble_format=IEEE_DOUBLE_LE
 	local tools=$IOS_PACKAGE_ROOT/.build/science-tools pybind_source=$IOS_PACKAGE_ROOT/packages/pybind11
 	local cython_source=$tools/cython-source
-	test "$(git -C "$IOS_PACKAGE_ROOT/packages/cython" rev-parse HEAD)" = bcd04a2966842d80de6ecff4e68e8d892bec5ef7
 	test "$(git -C "$pybind_source" rev-parse HEAD)" = 86eaeb338d7211c6d687ad27a66eae55855bd6ad
 	[[ $(flang --version) =~ version\ 23\. ]] || { echo "Flang 23 required" >&2; exit 1; }
-	test -f "$tools/bin/python" || uv venv --python 3.13.15 "$tools"
-	uv pip install --python "$tools/bin/python" -r "$IOS_PACKAGE_ROOT/scripts/requirements-ios-science.txt"
-	rm -rf "$cython_source"
-	mkdir -p "$cython_source"
-	git -C "$IOS_PACKAGE_ROOT/packages/cython" archive HEAD | tar -x -C "$cython_source"
-	# Cython #8082, #8083 and #8084: constant defaults and cleanup-safe re-entry.
-	patch -p1 -f -d "$cython_source" -i "$IOS_PACKAGE_ROOT/packages/cython-ios-reentry.patch"
-	NO_CYTHON_COMPILE=true uv pip install --no-build-isolation --no-cache --reinstall-package cython --reinstall-package pybind11 --python "$tools/bin/python" "$cython_source" "$pybind_source"
-	export PATH=$tools/bin:$PATH PYTHON_FOR_BUILD=$tools/bin/python
+	prepare_ios_cython
+	NO_CYTHON_COMPILE=true uv pip install --no-build-isolation --no-cache --reinstall-package pybind11 --python "$tools/bin/python" "$pybind_source"
 	[[ $cpu != arm64 ]] || cpu=aarch64
 	[[ $ASHELL_ARCH != x86_64 ]] || longdouble_format=INTEL_EXTENDED_16_BYTES_LE
 	PYTHON_SYSCONFIGDATA=${PYTHON_SYSCONFIGDATA:-$PREFIX/Library/lib/python3.13/_sysconfigdata__ios_$ASHELL_ARCH-$ASHELL_SDK.py}
