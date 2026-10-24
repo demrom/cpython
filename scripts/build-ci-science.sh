@@ -80,6 +80,15 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
 	for name in "${products[@]}"; do test -f "$PREFIX/iOS/Frameworks/$name.framework/$name"; done
 	frameworks=("$PREFIX/iOS/Frameworks/"*.framework)
 	test "${#frameworks[@]}" = 56
+	# Retain generator/configuration receipts before reclaiming each target's objects.
+	(
+		cd "$PREFIX"
+		find "build-$ASHELL_ARCH-$ASHELL_SDK" -type f \( -name '*.log' -o -name '*.json' -o -name '*.txt' -o -name '*.ninja' \) -print0 > build-receipts.nul
+		tar -czf build-receipts.tar.gz --null -T build-receipts.nul
+		tar -tzf build-receipts.tar.gz > build-receipts.txt
+		shasum -a 256 build-receipts.tar.gz > build-receipts.sha256
+	)
+	rm -rf "$PREFIX/build-$ASHELL_ARCH-$ASHELL_SDK"
 done
 
 mkdir -p "$build_root/universal" "$build_root/dist"

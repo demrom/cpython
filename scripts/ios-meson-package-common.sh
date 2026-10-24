@@ -55,6 +55,7 @@ c = ['xcrun', '--sdk', '$ASHELL_SDK', 'clang']
 cpp = ['xcrun', '--sdk', '$ASHELL_SDK', 'clang++']
 fortran = '$(command -v flang)'
 python = '$MESON_CROSSENV/cross/bin/python'
+pybind11-config = ['$MESON_CROSSENV/cross/bin/python', '-m', 'pybind11']
 cython = $cython_binary
 pkg-config = '$(command -v pkg-config)'
 strip = '/usr/bin/strip'

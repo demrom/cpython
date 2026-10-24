@@ -1,4 +1,49 @@
-#! /bin/sh
+#!/bin/bash
+
+# Explicit package builds share the maintained target toolchain; the no-argument
+# entry point below retains the existing PyZMQ build sequence.
+if [[ $# -gt 0 ]]; then
+	set -euo pipefail
+	source "$(dirname "$0")/ios-package-common.sh"
+	prepare_ios_cython
+	for package in "$@"; do
+		case $package in
+			argon2)
+				extract_ios_source argon2_cffi_bindings 25.1.0 b957f3e6ea4d55d820e40ff76f450952807013d361a65d7f28acc0acbf29229d
+				configure_ios_setup
+				export ARGON2_CFFI_USE_SSE2=0
+				;;
+			psutil)
+				extract_ios_source psutil eda9a5a 0e82964aa7e2bd3f796d4979c94b50a71568cabe3d9598c601076f446d4e3e9a https://github.com/holzschu/psutil/archive/eda9a5a6b34163d07ea1cc57fd4f2501aa3f94f3.tar.gz
+				configure_ios_setup
+				# The fork owns the iOS implementation; use the selected SDK and arch.
+				"$PYTHON_FOR_BUILD" - "$IOS_SOURCE_DIR/setup.py" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = 'get_xcode_isysroot(),\n            "-arch", \n            "arm64", \n            "-miphoneos-version-min=14.0",'
+assert text.count(old) == 3
+text = text.replace(old, 'os.environ["IOS_SDKROOT"],\n            "-target",\n            os.environ["IOS_TRIPLE"],')
+path.write_text(text)
+PY
+				export PLATFORM=iphoneos IOS_TRIPLE
+				;;
+			*) echo "Unsupported Jupyter package: $package" >&2; exit 1 ;;
+		esac
+		pushd "$IOS_SOURCE_DIR"
+		run_ios_setup build --parallel 4
+		copy_package_files
+		case $package in
+			argon2) install_site_package _argon2_cffi_bindings/_ffi build/lib.*/_argon2_cffi_bindings/_ffi*.so ;;
+			psutil)
+				install_site_package psutil/_psutil_posix build/lib.*/psutil/_psutil_posix*.so
+				install_site_package psutil/_psutil_ios build/lib.*/psutil/_psutil_ios*.so ;;
+		esac
+		popd
+	done
+	exit 0
+fi
 
 # Changed install prefix so multiple install coexist
 export PREFIX=$PWD
