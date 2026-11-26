@@ -136,7 +136,8 @@ install_site_package() {
 	plutil -replace CFBundleExecutable -string "$name" "$framework/Info.plist"
 	plutil -replace CFBundleIdentifier -string "$bundle_id" "$framework/Info.plist"
 	plutil -replace CFBundleName -string "$name" "$framework/Info.plist"
-	plutil -replace CFBundleSupportedPlatforms.0 -string "$IOS_PLATFORM" "$framework/Info.plist"
+	# Replacing an indexed entry can insert a second platform.
+	plutil -replace CFBundleSupportedPlatforms -json "[\"$IOS_PLATFORM\"]" "$framework/Info.plist"
 	plutil -replace MinimumOSVersion -string "$ASHELL_MIN_IOS" "$framework/Info.plist"
 	cp "$library" "$framework/$name"
 	install_name_tool -id "@rpath/$name.framework/$name" "$framework/$name"

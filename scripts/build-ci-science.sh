@@ -106,7 +106,7 @@ for name in "${products[@]}"; do
 		expected=IOS; platform=iPhoneOS; archs=arm64
 		if [[ $slice == *simulator ]]; then expected=IOSSIMULATOR; platform=iPhoneSimulator; archs='arm64 x86_64'; fi
 		test "$(lipo -archs "$binary" | tr ' ' '\n' | sort | paste -sd ' ' -)" = "$archs"
-		test "$(plutil -extract CFBundleSupportedPlatforms.0 raw "${binary%/*}/Info.plist")" = "$platform"
+		test "$(plutil -extract CFBundleSupportedPlatforms json -o - "${binary%/*}/Info.plist")" = "[\"$platform\"]"
 		for arch in $archs; do
 			xcrun vtool -arch "$arch" -show-build "$binary" > "$build_root/dist/$name-$slice-$arch.txt"
 			awk -v expected="$expected" '

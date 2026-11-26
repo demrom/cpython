@@ -52,8 +52,11 @@ for target in iphoneos iphonesimulator iphonesimulator-x86_64; do
 	bash "$source_root/scripts/scikitLearnPackages_iOS.sh"
 	frameworks=("$PREFIX/iOS/Frameworks/"*.framework)
 	test "${#frameworks[@]}" = 114
+	platform=iPhoneOS
+	[[ $ASHELL_SDK != iphonesimulator ]] || platform=iPhoneSimulator
 	for framework in "${frameworks[@]}"; do
 		name=$(basename "$framework" .framework)
+		test "$(plutil -extract CFBundleSupportedPlatforms json -o - "$framework/Info.plist")" = "[\"$platform\"]"
 		test "$(lipo -archs "$framework/$name")" = "$ASHELL_ARCH"
 		xcrun vtool -show-build "$framework/$name"
 		otool -L "$framework/$name"
